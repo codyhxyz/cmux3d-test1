@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#08080b" />
+    <title>CMUX3D — Six shells, one workspace</title>
+    <link rel="stylesheet" href="/vendor/xterm.css" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <canvas class="shader-field" id="shader-field" aria-hidden="true"></canvas>
+
+    <header class="masthead">
+      <a class="brand" href="/" aria-label="CMUX3D home">
+        <span class="brand__cube" aria-hidden="true"></span>
+        <span><strong>CMUX3D</strong><small>spatial shell</small></span>
+      </a>
+      <button class="settings-button" type="button" popovertarget="settings-panel">Settings</button>
+      <section class="settings-panel" id="settings-panel" popover aria-label="Workspace settings">
+        <header>
+          <strong>Workspace</strong>
+          <button type="button" popovertarget="settings-panel" popovertargetaction="hide" aria-label="Close settings">Done</button>
+        </header>
+        <label class="setting setting--range" for="face-opacity">
+          <span>Face opacity <output id="face-opacity-value" for="face-opacity">100%</output></span>
+          <input id="face-opacity" type="range" min="0.2" max="1" step="0.05" value="1" />
+        </label>
+        <label class="setting setting--range" for="momentum-duration">
+          <span>Momentum <output id="momentum-duration-value" for="momentum-duration">10 sec</output></span>
+          <input id="momentum-duration" type="range" min="1" max="100" step="1" value="24" aria-label="Momentum duration" />
+        </label>
+        <label class="setting setting--toggle" for="zero-gravity">
+          <span><strong>Zero gravity</strong><small>Allow pointer and drag momentum.</small></span>
+          <input id="zero-gravity" type="checkbox" checked />
+        </label>
+      </section>
+    </header>
+
+    <aside class="dock" aria-label="Terminal faces">
+      <nav id="port-list" aria-label="Focus a terminal face"></nav>
+    </aside>
+
+    <main class="viewport" id="viewport" aria-label="Rotatable terminal cube">
+      <p class="sr-only" id="cube-instructions">Drag to rotate, use the mouse wheel to zoom, and select a face to type in its shell. Press Escape to release it.</p>
+      <section class="rig" id="rig" aria-describedby="cube-instructions">
+        <article class="panel panel--front" data-face="0">
+          <header></header>
+          <div class="terminal-surface" id="terminal-0"></div>
+        </article>
+        <article class="panel panel--back" data-face="1">
+          <header></header>
+          <div class="terminal-surface" id="terminal-1"></div>
+        </article>
+        <article class="panel panel--right" data-face="2">
+          <header></header>
+          <div class="terminal-surface" id="terminal-2"></div>
+        </article>
+        <article class="panel panel--left" data-face="3">
+          <header></header>
+          <div class="terminal-surface" id="terminal-3"></div>
+        </article>
+        <article class="panel panel--top" data-face="4">
+          <header></header>
+          <div class="terminal-surface" id="terminal-4"></div>
+        </article>
+        <article class="panel panel--bottom" data-face="5">
+          <header></header>
+          <div class="terminal-surface" id="terminal-5"></div>
+        </article>
+      </section>
+    </main>
+
+    <footer class="controls" aria-hidden="true">
+      <span>Drag <b>orbit</b></span>
+      <span>Scroll <b>depth</b></span>
+      <span>Click <b>focus</b></span>
+      <span>Esc <b>release</b></span>
+    </footer>
+
+    <script type="module" src="/app/main.js"></script>
+  </body>
+</html>
