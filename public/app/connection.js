@@ -1,5 +1,7 @@
-export const hosted = location.hostname !== '127.0.0.1' && location.hostname !== 'localhost';
-const origin = hosted ? 'http://127.0.0.1:8064' : location.origin;
+import { DEFAULT_COMPANION_HOST, DEFAULT_COMPANION_PORT, isLoopbackHostname } from './connection-config.js';
+
+export const hosted = !isLoopbackHostname(location.hostname);
+const origin = hosted ? `http://${DEFAULT_COMPANION_HOST}:${DEFAULT_COMPANION_PORT}` : location.origin;
 const fragment = new URLSearchParams(location.hash.slice(1));
 let token = fragment.get('token') || '';
 

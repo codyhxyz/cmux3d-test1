@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { DEFAULT_COMPANION_HOST, DEFAULT_COMPANION_PORT } from '../../public/app/connection-config.js';
 import { paths } from './config.js';
 import { readHerdrState, watchHerdrState } from './herdr-state.js';
 import { createStaticResponder } from './static.js';
@@ -74,7 +75,7 @@ export function createRuntime(options = {}) {
         };
         server.once('error', onError);
         server.once('listening', onListening);
-        server.listen(options.port ?? 8064, options.host || '127.0.0.1');
+        server.listen(options.port ?? DEFAULT_COMPANION_PORT, options.host || DEFAULT_COMPANION_HOST);
       });
     },
     address() {

@@ -1,8 +1,10 @@
+import { isLoopbackHostname } from '../../public/app/connection-config.js';
+
 export function browserOriginAllowed(origin, webOrigin) {
   if (!origin) return true;
   try {
     const { hostname } = new URL(origin);
-    return ['127.0.0.1', 'localhost', '[::1]'].includes(hostname) || origin === webOrigin;
+    return isLoopbackHostname(hostname) || origin === webOrigin;
   } catch {
     return false;
   }

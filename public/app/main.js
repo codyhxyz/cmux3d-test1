@@ -1,3 +1,4 @@
+import { isPageActive, onPageActivity } from './activity.js';
 import { companionHttp, hosted } from './connection.js';
 import { FACETS } from './facets.js';
 import { herdrMetadata } from './herdr.js';
@@ -24,6 +25,7 @@ const handCursors = new Map([...document.querySelectorAll('.hand-cursor')].map((
 const companionGate = document.getElementById('companion-gate');
 const companionConnect = document.getElementById('companion-connect');
 const companionStatus = document.getElementById('companion-status');
+const companionLocal = document.getElementById('companion-local');
 const shader = startShader(document.getElementById('shader-field'));
 let connected = false;
 let herdrEvents;
@@ -67,6 +69,7 @@ const hands = createHandTracking({
   },
 });
 
+companionLocal.href = companionHttp('/');
 renderFaces();
 renderPorts();
 space.bind();
@@ -97,8 +100,7 @@ handCamera.addEventListener('change', async () => {
 });
 navigator.mediaDevices?.addEventListener('devicechange', refreshCameras);
 refreshCameras();
-window.addEventListener('focus', () => fleet.setWindowActive(true));
-window.addEventListener('blur', () => fleet.setWindowActive(false));
+onPageActivity((active) => fleet.setWindowActive(active));
 updateOpacity();
 updateMomentumValue(space.settleSeconds);
 updateHandSensitivity();
@@ -112,7 +114,7 @@ async function connectCompanion() {
     if (!response.ok) throw new Error(response.status === 401 ? 'Pairing link required' : `Companion returned ${response.status}`);
     connected = true;
     fleet.start();
-    fleet.setWindowActive(document.hasFocus());
+    fleet.setWindowActive(isPageActive());
     herdrEvents = new EventSource(companionHttp('/api/herdr/events'));
     herdrEvents.addEventListener('message', refreshHerdrState);
     companionGate.close();

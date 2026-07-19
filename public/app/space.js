@@ -1,3 +1,4 @@
+import { isPageActive, onPageActivity } from './activity.js';
 import { FACETS } from './facets.js';
 
 export const SETTLE_SECONDS = 10;
@@ -58,7 +59,7 @@ export class SpaceController {
     this.frame = 0;
     this.settleSeconds = SETTLE_SECONDS;
     this.zeroGravity = !matchMedia('(prefers-reduced-motion: reduce)').matches;
-    this.windowActive = document.hasFocus() && !document.hidden;
+    this.windowActive = isPageActive();
     this.lastTick = Date.now();
     this.settleAt = this.lastTick + this.settleSeconds * 1000;
   }
@@ -76,11 +77,7 @@ export class SpaceController {
       panel.addEventListener('dblclick', () => this.focus(Number(panel.dataset.face)));
     });
 
-    window.addEventListener('focus', () => this.#setWindowActive(true));
-    window.addEventListener('blur', () => this.#setWindowActive(false));
-    window.addEventListener('pageshow', () => this.#setWindowActive(document.hasFocus()));
-    window.addEventListener('pagehide', () => this.#setWindowActive(false));
-    document.addEventListener('visibilitychange', () => this.#setWindowActive(!document.hidden && document.hasFocus()));
+    onPageActivity((active) => this.#setWindowActive(active));
     window.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape' || this.focused === null) return;
       event.preventDefault();

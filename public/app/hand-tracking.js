@@ -1,3 +1,5 @@
+import { isPageActive, onPageActivity } from './activity.js';
+
 const PALM_LANDMARKS = [0, 5, 9, 13, 17];
 const OPEN_FINGERS = [[9, 10, 12], [13, 14, 16], [17, 18, 20]];
 const MIN_HAND_SIZE = 0.08;
@@ -237,9 +239,7 @@ export function createHandTracking({ video, onInput, onStatus = () => {}, onFeed
     })];
   }));
 
-  document.addEventListener('visibilitychange', handleActivity);
-  window.addEventListener('focus', handleActivity);
-  window.addEventListener('blur', handleActivity);
+  onPageActivity(handleActivity);
 
   async function enable(deviceId) {
     if (enabled) return true;
@@ -391,9 +391,8 @@ export function createHandTracking({ video, onInput, onStatus = () => {}, onFeed
     if (!wasStarting && enabled) disable(error.message);
   }
 
-  function handleActivity() {
+  function handleActivity(active = isPageActive()) {
     if (!enabled) return;
-    const active = !document.hidden && document.hasFocus();
     if (running === active) return;
     running = active;
     stream?.getTracks().forEach((track) => { track.enabled = active; });

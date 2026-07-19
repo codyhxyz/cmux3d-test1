@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { VENDOR_ASSETS } from '../vendor-assets.js';
 import { allowCors, hostedRequestAuthorized } from './origin.js';
 
 const contentTypes = new Map([
@@ -18,24 +19,7 @@ const contentTypes = new Map([
 export function createStaticResponder(publicRoot, readHerdrState, watchHerdrState, webOrigin, token) {
   const root = path.resolve(publicRoot);
   const modules = path.resolve(root, '..', 'node_modules');
-  const mediapipe = path.join(modules, '@mediapipe/tasks-vision');
-  const mediapipeWasm = [
-    'vision_wasm_internal.js',
-    'vision_wasm_internal.wasm',
-    'vision_wasm_module_internal.js',
-    'vision_wasm_module_internal.wasm',
-    'vision_wasm_nosimd_internal.js',
-    'vision_wasm_nosimd_internal.wasm',
-  ];
-  const vendorFiles = new Map([
-    ['/vendor/xterm.css', path.join(modules, '@xterm/xterm/css/xterm.css')],
-    ['/vendor/xterm.mjs', path.join(modules, '@xterm/xterm/lib/xterm.mjs')],
-    ['/vendor/addon-attach.mjs', path.join(modules, '@xterm/addon-attach/lib/addon-attach.mjs')],
-    ['/vendor/addon-fit.mjs', path.join(modules, '@xterm/addon-fit/lib/addon-fit.mjs')],
-    ['/vendor/addon-webgl.mjs', path.join(modules, '@xterm/addon-webgl/lib/addon-webgl.mjs')],
-    ['/vendor/mediapipe/vision_bundle.mjs', path.join(mediapipe, 'vision_bundle.mjs')],
-    ...mediapipeWasm.map((file) => [`/vendor/mediapipe/wasm/${file}`, path.join(mediapipe, 'wasm', file)]),
-  ]);
+  const vendorFiles = new Map(VENDOR_ASSETS.map(([route, source]) => [route, path.join(modules, source)]));
 
   return async function serveStatic(req, res) {
     const corsAllowed = allowCors(req, res, webOrigin);
