@@ -2,8 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { paths } from './config.js';
 
-export function chooseShell(preferred) {
-  const candidates = [preferred, '/bin/zsh', '/bin/bash', '/bin/sh'].filter(Boolean);
+export function resolveExecutable(command) {
+  if (!command) return null;
+  const candidates = command.includes(path.sep)
+    ? [command]
+    : (process.env.PATH || '').split(path.delimiter).map((directory) => path.join(directory, command));
   for (const candidate of candidates) {
     try {
       fs.accessSync(candidate, fs.constants.X_OK);
@@ -12,7 +15,13 @@ export function chooseShell(preferred) {
       // Try the next candidate.
     }
   }
-  return '/bin/sh';
+  return null;
+}
+
+export function chooseShell(preferred) {
+  return [preferred, '/bin/zsh', '/bin/bash', '/bin/sh']
+    .map(resolveExecutable)
+    .find(Boolean) || '/bin/sh';
 }
 
 export function repairDarwinPtyHelper() {

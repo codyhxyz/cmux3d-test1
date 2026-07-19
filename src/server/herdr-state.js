@@ -3,149 +3,151 @@ import net from 'node:net';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+const FACE_COUNT = 6;
 const EVENT_TYPES = [
-  'workspace.created',
-  'workspace.updated',
   'workspace.renamed',
   'workspace.closed',
-  'workspace.focused',
   'tab.created',
   'tab.renamed',
   'tab.closed',
-  'tab.focused',
   'pane.created',
   'pane.closed',
-  'pane.focused',
   'pane.moved',
   'pane.agent_detected',
 ];
-const RECONNECT_EVENTS = new Set(['workspace_created', 'tab_created', 'pane_created']);
+export const DEFAULT_WORKSPACE = 'Coding Cube';
 
-export const HERDR_SESSIONS = Object.freeze([
-  'cmux3d-front',
-  'cmux3d-back',
-  'cmux3d-right',
-  'cmux3d-left',
-  'cmux3d-top',
-  'cmux3d-bottom',
-]);
+export async function readHerdrState(executable = 'herdr', workspaceLabel = DEFAULT_WORKSPACE) {
+  const envelope = JSON.parse((await execFileAsync(
+    executable,
+    ['--session', 'default', 'api', 'snapshot'],
+    { maxBuffer: 10 * 1024 * 1024 },
+  )).stdout);
 
-export function readHerdrState(executable = 'herdr') {
-  return Promise.all(HERDR_SESSIONS.map((session, face) => readHerdrSession(executable, session, face)));
+  return selectCubeFaces(envelope, workspaceLabel).map(({ face, workspace, tab, pane }) => ({
+    face,
+    session: 'default',
+    workspace: workspace.label,
+    tabId: tab.tab_id,
+    paneId: pane.pane_id,
+    terminalId: pane.terminal_id,
+    snapshot: {
+      ...envelope,
+      result: {
+        ...envelope.result,
+        snapshot: {
+          ...envelope.result.snapshot,
+          focused_workspace_id: workspace.workspace_id,
+          focused_tab_id: tab.tab_id,
+          focused_pane_id: pane.pane_id,
+        },
+      },
+    },
+  }));
 }
 
-export async function watchHerdrState(executable, onChange, onDisconnect) {
-  const sockets = new Set();
-  let restartRequested = false;
+export function selectCubeFaces(envelope, workspaceLabel = DEFAULT_WORKSPACE) {
+  const snapshot = envelope?.result?.snapshot;
+  if (!snapshot) throw new Error('HerdR snapshot is missing');
+
+  const workspaces = snapshot.workspaces.filter(({ label }) => label === workspaceLabel);
+  if (workspaces.length !== 1) {
+    throw new Error(`expected exactly one HerdR workspace named "${workspaceLabel}"; found ${workspaces.length}`);
+  }
+
+  const workspace = workspaces[0];
+  const workspaceTabs = snapshot.tabs.filter(({ workspace_id }) => workspace_id === workspace.workspace_id);
+
+  return Array.from({ length: FACE_COUNT }, (_, face) => {
+    const label = `Face ${face + 1}`;
+    const tabs = workspaceTabs.filter((tab) => tab.label === label);
+    if (tabs.length !== 1) throw new Error(`HerdR workspace "${workspaceLabel}" must contain exactly one tab named "${label}"`);
+    const tab = tabs[0];
+    const panes = snapshot.panes.filter(({ tab_id }) => tab_id === tab.tab_id);
+    if (panes.length !== 1 || !panes[0].terminal_id) {
+      throw new Error(`tab "${tab.label}" must contain exactly one terminal pane`);
+    }
+    return { face, workspace, tab, pane: panes[0] };
+  });
+}
+
+export async function watchHerdrState(executable, onChange, onDisconnect, workspaceLabel = DEFAULT_WORKSPACE) {
+  const state = await readHerdrState(executable, workspaceLabel);
+  const { stdout } = await execFileAsync(executable, ['--session', 'default', 'status', 'server']);
+  const socketPath = stdout.match(/^socket:\s*(.+)$/m)?.[1];
+  if (!socketPath) throw new Error('HerdR did not report its default session socket');
+
+  let socket;
+  let changeTimer;
   let stopped = false;
-  let watching = false;
   const stop = () => {
     stopped = true;
-    for (const socket of sockets) socket.destroy();
-    sockets.clear();
+    clearTimeout(changeTimer);
+    socket?.destroy();
   };
-  const disconnect = () => {
-    if (stopped) return;
-    stop();
-    onDisconnect();
+  const changed = () => {
+    clearTimeout(changeTimer);
+    changeTimer = setTimeout(() => {
+      if (!stopped) onChange();
+    }, 250);
   };
 
-  try {
-    const state = await readHerdrState(executable);
-    await Promise.all(state.map(({ session, snapshot }, face) => subscribe(
-      session,
-      face,
-      snapshot.result?.snapshot?.panes || [],
-    )));
-    if (restartRequested) throw new Error('HerdR topology changed while subscribing');
-    watching = true;
-  } catch (error) {
-    stop();
-    throw error;
-  }
+  await new Promise((resolve, reject) => {
+    socket = net.createConnection(socketPath);
+    const id = 'cmux3d';
+    let buffer = '';
+    let ready = false;
+
+    const fail = (error) => {
+      if (stopped) return;
+      if (!ready) reject(error);
+      else {
+        stop();
+        onDisconnect();
+      }
+    };
+
+    socket.on('connect', () => socket.write(`${JSON.stringify({
+      id,
+      method: 'events.subscribe',
+      params: {
+        subscriptions: [
+          ...EVENT_TYPES.map((type) => ({ type })),
+          ...state.map(({ paneId }) => ({ type: 'pane.agent_status_changed', pane_id: paneId })),
+        ],
+      },
+    })}\n`));
+    socket.on('error', fail);
+    socket.on('close', () => fail(new Error('HerdR event stream closed')));
+    socket.on('data', (chunk) => {
+      buffer += chunk;
+      for (;;) {
+        const newline = buffer.indexOf('\n');
+        if (newline < 0) break;
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        if (!line) continue;
+
+        let message;
+        try {
+          message = JSON.parse(line);
+        } catch (error) {
+          fail(error);
+          return;
+        }
+        if (message.error) {
+          fail(new Error(message.error.message));
+          return;
+        }
+        if (message.id === id) {
+          ready = true;
+          resolve();
+        } else if (message.event) {
+          changed();
+        }
+      }
+    });
+  });
 
   return stop;
-
-  async function subscribe(session, face, panes) {
-    const { stdout } = await execFileAsync(executable, ['--session', session, 'status', 'server']);
-    const socketPath = stdout.match(/^socket:\s*(.+)$/m)?.[1];
-    if (!socketPath) throw new Error(`HerdR did not report a socket for ${session}`);
-
-    await new Promise((resolve, reject) => {
-      const socket = net.createConnection(socketPath);
-      const id = `cmux3d:${face}`;
-      let buffer = '';
-      let ready = false;
-      sockets.add(socket);
-
-      const fail = (error) => {
-        if (stopped) return;
-        if (!ready) reject(error);
-        else disconnect();
-      };
-
-      socket.on('connect', () => socket.write(`${JSON.stringify({
-        id,
-        method: 'events.subscribe',
-        params: {
-          subscriptions: [
-            ...EVENT_TYPES.map((type) => ({ type })),
-            ...panes.map(({ pane_id }) => ({ type: 'pane.agent_status_changed', pane_id })),
-          ],
-        },
-      })}\n`));
-      socket.on('error', fail);
-      socket.on('close', () => {
-        sockets.delete(socket);
-        if (!stopped) fail(new Error(`HerdR event stream closed for ${session}`));
-      });
-      socket.on('data', (chunk) => {
-        buffer += chunk;
-        let changed = false;
-        for (;;) {
-          const newline = buffer.indexOf('\n');
-          if (newline < 0) break;
-          const line = buffer.slice(0, newline);
-          buffer = buffer.slice(newline + 1);
-          if (!line) continue;
-
-          let message;
-          try {
-            message = JSON.parse(line);
-          } catch (error) {
-            fail(error);
-            return;
-          }
-
-          if (message.error) {
-            fail(new Error(message.error.message));
-            return;
-          }
-          if (message.id === id) {
-            ready = true;
-            resolve();
-          } else if (RECONNECT_EVENTS.has(message.event)) {
-            if (watching) disconnect();
-            else restartRequested = true;
-            return;
-          } else if (message.event) {
-            changed = true;
-          }
-        }
-        if (changed && !stopped) onChange(face);
-      });
-    });
-  }
-}
-
-async function readHerdrSession(executable, session, face) {
-  return {
-    face,
-    session,
-    snapshot: JSON.parse((await execFileAsync(
-      executable,
-      ['--session', session, 'api', 'snapshot'],
-      { maxBuffer: 10 * 1024 * 1024 },
-    )).stdout),
-  };
 }

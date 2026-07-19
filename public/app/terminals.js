@@ -1,4 +1,5 @@
 import { AttachAddon } from '/vendor/addon-attach.mjs';
+import { companionWebSocket } from './connection.js';
 import { FitAddon } from '/vendor/addon-fit.mjs';
 import { WebglAddon } from '/vendor/addon-webgl.mjs';
 import { Terminal } from '/vendor/xterm.mjs';
@@ -40,7 +41,7 @@ export class TerminalFleet {
       }
       term.write(`\x1b[36mopening ${facet.name.toLowerCase()} channel…\x1b[0m\r\n`);
 
-      const entry = { facet, host, term, fit, ws: null };
+      const entry = { facet, host, term, fit, ws: null, failures: 0, openedAt: 0 };
       this.entries.set(facet.face, entry);
       this.resizeObserver.observe(host);
       this.#connect(entry);
@@ -76,20 +77,25 @@ export class TerminalFleet {
   }
 
   #connect(entry) {
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${protocol}//${location.host}/ws/pty?face=${entry.facet.face}&slot=${this.slot}`;
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(companionWebSocket(`/ws/pty?face=${entry.facet.face}&slot=${this.slot}`));
     entry.ws = ws;
 
     ws.addEventListener('open', () => {
+      entry.openedAt = Date.now();
       entry.term.loadAddon(new AttachAddon(ws));
       this.#sendSize(entry);
     });
 
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', (event) => {
       if (entry.ws !== ws) return;
-      entry.term.write('\r\n\x1b[33mchannel closed; retrying…\x1b[0m\r\n');
-      setTimeout(() => this.#connect(entry), 1100);
+      if (event.code === 1011) {
+        entry.term.write('\r\n\x1b[31mterminal unavailable; restart the server to retry\x1b[0m\r\n');
+        return;
+      }
+      if (Date.now() - entry.openedAt >= 30_000) entry.failures = 0;
+      const delay = Math.min(1000 * 2 ** entry.failures++, 60_000);
+      entry.term.write(`\r\n\x1b[33mchannel closed; retrying in ${Math.ceil(delay / 1000)}s…\x1b[0m\r\n`);
+      setTimeout(() => this.#connect(entry), delay);
     });
   }
 

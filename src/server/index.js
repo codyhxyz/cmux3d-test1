@@ -1,11 +1,26 @@
+import { execFile } from 'node:child_process';
 import { readServerOptions } from './config.js';
 import { createRuntime } from './runtime.js';
 
 const options = readServerOptions();
-const runtime = createRuntime(options);
+const runtime = createRuntime({
+  ...options,
+  onIdle() {
+    console.log('cmux3d closed after its last cube disconnected');
+    process.exit(0);
+  },
+});
 
 runtime.start().then(({ host, port }) => {
-  console.log(`cmux3d is listening at http://${host}:${port}/`);
+  const localUrl = `http://${host}:${port}/`;
+  const webUrl = `${options.webOrigin}/#token=${encodeURIComponent(options.token)}`;
+  console.log(`cmux3d is listening at ${localUrl}`);
+  if (process.env.CMUX3D_OPEN === '0') return;
+  if (process.platform === 'darwin') execFile('open', [webUrl]);
+  else console.log(`open ${webUrl}`);
+}).catch((error) => {
+  console.error(`cmux3d failed to start: ${error.message}`);
+  process.exitCode = 1;
 });
 
 async function shutdown() {

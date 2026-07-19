@@ -10,6 +10,18 @@
   </head>
   <body>
     <canvas class="shader-field" id="shader-field" aria-hidden="true"></canvas>
+    <dialog class="companion-gate" id="companion-gate" aria-labelledby="companion-gate-title">
+      <strong id="companion-gate-title">Connect your local cube</strong>
+      <p>The interface is hosted; HerdR, Pi, terminals, and files stay on this machine.</p>
+      <button id="companion-connect" type="button">Connect companion</button>
+      <output id="companion-status" aria-live="polite">Start CMUX3D locally, then use the page it opens.</output>
+      <nav aria-label="Companion options">
+        <a href="https://github.com/codyhxyz/cmux3d-test1">Install the companion</a>
+        <a href="http://127.0.0.1:8064/">Open locally</a>
+      </nav>
+    </dialog>
+    <span class="hand-cursor" data-hand="hand-left" aria-hidden="true" hidden></span>
+    <span class="hand-cursor" data-hand="hand-right" aria-hidden="true" hidden></span>
 
     <header class="masthead">
       <a class="brand" href="/" aria-label="CMUX3D home">
@@ -34,6 +46,25 @@
           <span><strong>Zero gravity</strong><small>Allow pointer and drag momentum.</small></span>
           <input id="zero-gravity" type="checkbox" checked />
         </label>
+        <label class="setting setting--toggle" for="hand-control">
+          <span>
+            <strong>Hand control</strong>
+            <small>Pinch either hand with fingers open to grab; pinch both to zoom. Camera stays local. <output id="hand-control-status" aria-live="polite">Off</output></small>
+          </span>
+          <input id="hand-control" type="checkbox" />
+        </label>
+        <label class="setting setting--toggle" for="hand-camera">
+          <span><strong>Camera</strong><small>Select the webcam used for hand control.</small></span>
+          <select id="hand-camera" aria-label="Hand control camera"><option value="">Default camera</option></select>
+        </label>
+        <label class="setting setting--range" for="hand-sensitivity">
+          <span>Hand sensitivity <output id="hand-sensitivity-value" for="hand-sensitivity">1.0×</output></span>
+          <input id="hand-sensitivity" type="range" min="0.5" max="2" step="0.1" value="1" />
+        </label>
+        <figure class="hand-preview" aria-hidden="true">
+          <video id="hand-video" autoplay muted playsinline></video>
+          <figcaption>Mirrored preview · processed locally</figcaption>
+        </figure>
       </section>
     </header>
 

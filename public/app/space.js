@@ -10,6 +10,8 @@ export const DRAG_STOP_SPEED = 2;
 export const DRAG_DAMPING = Math.log(MAX_DRAG_ANGULAR_SPEED / DRAG_STOP_SPEED) / SETTLE_SECONDS;
 const DRAG_SENSITIVITY = 0.28;
 const DRAG_SAMPLE_TIMEOUT_MS = 80;
+const MIN_ZOOM = 0.72;
+const MAX_ZOOM = 1.42;
 
 export function integrateDamped(position, velocity, seconds, damping = DAMPING) {
   const decay = Math.exp(-damping * seconds);
@@ -147,73 +149,103 @@ export class SpaceController {
     this.onRelease();
   }
 
-  #pointerDown(event) {
-    const terminal = event.target.closest?.('.terminal-surface');
-    const panel = event.target.closest?.('.panel');
-    if (terminal && panel?.classList.contains('is-focused')) return;
+  dragInput({ type, id = 'hand', x = 0, y = 0, time = performance.now(), panelFace: startFace = null } = {}) {
+    if (type === 'start') {
+      if (this.drag) {
+        if (this.drag.second || this.drag.id === id || typeof this.drag.id !== typeof id) return false;
+        this.drag.second = { id, x, y };
+        this.drag.pair = inputPair(this.drag, this.drag.second);
+        this.drag.velocity = { x: 0, y: 0 };
+        this.drag.time = time;
+        this.drag.moved = true;
+        this.drag.panelFace = null;
+        return true;
+      }
 
-    const now = Date.now();
-    this.#advance(now);
-    this.#pause();
-    this.velocity = { x: 0, y: 0 };
-    this.inertia = false;
-    this.drag = {
-      id: event.pointerId,
-      x: event.clientX,
-      y: event.clientY,
-      time: event.timeStamp,
-      velocity: { x: 0, y: 0 },
-      distance: 0,
-      moved: false,
-      panelFace: panel ? Number(panel.dataset.face) : null,
-    };
-    this.viewport.setPointerCapture(event.pointerId);
-    this.rig.classList.add('is-moving');
-    document.body.classList.add('is-dragging');
-  }
-
-  #pointerMove(event) {
-    if (!this.drag || this.drag.id !== event.pointerId) {
-      if (this.zeroGravity && this.focused === null) this.#kick(event.movementX, event.movementY, 0.008);
-      return;
+      const now = Date.now();
+      this.#advance(now);
+      this.#pause();
+      this.velocity = { x: 0, y: 0 };
+      this.inertia = false;
+      this.drag = {
+        id,
+        x,
+        y,
+        time,
+        velocity: { x: 0, y: 0 },
+        distance: 0,
+        moved: false,
+        panelFace: startFace,
+        second: null,
+        pair: null,
+      };
+      this.rig.classList.add('is-moving');
+      document.body.classList.add('is-dragging');
+      return true;
     }
 
-    const dx = event.clientX - this.drag.x;
-    const dy = event.clientY - this.drag.y;
-    this.drag.distance += Math.hypot(dx, dy);
-    if (this.drag.distance > 4) this.drag.moved = true;
+    if (!this.drag || (this.drag.id !== id && this.drag.second?.id !== id)) return false;
 
-    this.rotation.y += dx * DRAG_SENSITIVITY;
-    this.rotation.x -= dy * DRAG_SENSITIVITY;
-    if (dx || dy) {
-      this.drag.velocity = dragVelocity(dx, dy, event.timeStamp - this.drag.time);
-      this.drag.time = event.timeStamp;
+    if (type === 'move') {
+      const input = this.drag.id === id ? this.drag : this.drag.second;
+      const previous = this.drag.second ? this.drag.pair : { x: input.x, y: input.y, span: 0 };
+      input.x = x;
+      input.y = y;
+      const next = this.drag.second ? inputPair(this.drag, this.drag.second) : input;
+      const dx = next.x - previous.x;
+      const dy = next.y - previous.y;
+      const spanDelta = (next.span || 0) - (previous.span || 0);
+
+      if (this.drag.second) {
+        if (previous.span > 1) this.zoom = clamp(this.zoom * next.span / previous.span, MIN_ZOOM, MAX_ZOOM);
+        this.drag.pair = next;
+      }
+      this.drag.distance += Math.hypot(dx, dy) + Math.abs(spanDelta);
+      if (this.drag.distance > 4) this.drag.moved = true;
+
+      this.rotation.y += dx * DRAG_SENSITIVITY;
+      this.rotation.x -= dy * DRAG_SENSITIVITY;
+      if (dx || dy) {
+        this.drag.velocity = dragVelocity(dx, dy, time - this.drag.time);
+        this.drag.time = time;
+      } else if (spanDelta) {
+        this.drag.velocity = { x: 0, y: 0 };
+        this.drag.time = time;
+      }
+      if (this.focused !== null) this.release();
+      this.#apply();
+      return true;
     }
-    this.drag.x = event.clientX;
-    this.drag.y = event.clientY;
-    if (this.focused !== null) this.onRelease();
-    this.focused = null;
-    this.#markPanels();
-    this.#apply();
-  }
 
-  #pointerUp(event) {
-    if (!this.drag || this.drag.id !== event.pointerId) return;
-    const { moved, panelFace, time, velocity } = this.drag;
+    if (type !== 'end' && type !== 'cancel') return false;
+    if (this.drag.second) {
+      if (this.drag.id === id) {
+        this.drag.id = this.drag.second.id;
+        this.drag.x = this.drag.second.x;
+        this.drag.y = this.drag.second.y;
+      }
+      this.drag.second = null;
+      this.drag.pair = null;
+      this.drag.velocity = { x: 0, y: 0 };
+      this.drag.time = time;
+      return true;
+    }
+
+    const { moved, panelFace, time: lastMoveTime, velocity } = this.drag;
     this.drag = null;
     document.body.classList.remove('is-dragging');
 
-    if (!moved && panelFace !== null) {
+    if (type === 'end' && !moved && panelFace !== null) {
       this.focus(panelFace);
-      return;
+      return true;
     }
 
     const speed = Math.hypot(velocity.x, velocity.y);
-    if (!this.zeroGravity || event.type === 'pointercancel' || event.timeStamp - time > DRAG_SAMPLE_TIMEOUT_MS || speed <= DRAG_STOP_SPEED) {
+    if (!this.zeroGravity || type === 'cancel' || time - lastMoveTime > DRAG_SAMPLE_TIMEOUT_MS || speed <= DRAG_STOP_SPEED) {
       this.velocity = { x: 0, y: 0 };
       this.inertia = false;
       this.#pause();
-      return;
+      return true;
     }
 
     const now = Date.now();
@@ -222,12 +254,44 @@ export class SpaceController {
     this.lastTick = now;
     this.settleAt = now + this.settleSeconds * 1000;
     this.#schedule();
+    return true;
+  }
+
+  #pointerDown(event) {
+    const terminal = event.target.closest?.('.terminal-surface');
+    const panel = event.target.closest?.('.panel');
+    if (terminal && Number(panel?.dataset.face) === this.focused) return;
+    if (!this.dragInput({
+      type: 'start',
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      time: event.timeStamp,
+      panelFace: panel ? Number(panel.dataset.face) : null,
+    })) return;
+    this.viewport.setPointerCapture(event.pointerId);
+  }
+
+  #pointerMove(event) {
+    if (!this.drag) {
+      if (this.zeroGravity && this.focused === null) this.#kick(event.movementX, event.movementY, 0.008);
+      return;
+    }
+    this.dragInput({ type: 'move', id: event.pointerId, x: event.clientX, y: event.clientY, time: event.timeStamp });
+  }
+
+  #pointerUp(event) {
+    this.dragInput({
+      type: event.type === 'pointercancel' ? 'cancel' : 'end',
+      id: event.pointerId,
+      time: event.timeStamp,
+    });
   }
 
   #wheel(event) {
-    if (event.target.closest?.('.panel.is-focused .terminal-surface')) return;
+    if (this.focused !== null) return;
     event.preventDefault();
-    this.zoom = clamp(this.zoom - event.deltaY * 0.0012, 0.72, 1.42);
+    this.zoom = clamp(this.zoom - event.deltaY * 0.0012, MIN_ZOOM, MAX_ZOOM);
     this.#apply();
   }
 
@@ -289,9 +353,11 @@ export class SpaceController {
       return;
     }
     if (this.drag) {
-      if (this.viewport.hasPointerCapture(this.drag.id)) this.viewport.releasePointerCapture(this.drag.id);
-      this.drag = null;
-      document.body.classList.remove('is-dragging');
+      const ids = [this.drag.id, this.drag.second?.id].filter((id) => id !== undefined);
+      for (const id of ids) {
+        if (typeof id === 'number' && this.viewport.hasPointerCapture(id)) this.viewport.releasePointerCapture(id);
+        this.dragInput({ type: 'cancel', id });
+      }
     }
     this.#pause();
   }
@@ -310,6 +376,14 @@ export class SpaceController {
     this.onMove(this.rotation);
     if (!this.frame && !this.drag && !Math.hypot(this.velocity.x, this.velocity.y)) this.rig.classList.remove('is-moving');
   }
+}
+
+function inputPair(a, b) {
+  return {
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
+    span: Math.hypot(a.x - b.x, a.y - b.y),
+  };
 }
 
 function clamp(value, min, max) {

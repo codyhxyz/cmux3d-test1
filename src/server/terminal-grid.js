@@ -1,7 +1,7 @@
 import os from 'node:os';
 import pty from 'node-pty';
-import { HERDR_SESSIONS } from './herdr-state.js';
-import { chooseShell, repairDarwinPtyHelper } from './shell.js';
+import { DEFAULT_WORKSPACE, readHerdrState } from './herdr-state.js';
+import { chooseShell, repairDarwinPtyHelper, resolveExecutable } from './shell.js';
 
 const FACE_MIN = 0;
 const FACE_MAX = 5;
@@ -11,17 +11,36 @@ const RESIZE_MAGIC = Buffer.from('CMUX');
 const HISTORY_LIMIT = 1_000_000;
 
 export class TerminalGrid {
-  constructor({ cwd, shell, herdr } = {}) {
+  constructor({ cwd, shell, herdr, workspace = DEFAULT_WORKSPACE } = {}) {
     repairDarwinPtyHelper();
     this.cwd = cwd || os.homedir();
     this.shell = chooseShell(shell);
-    this.herdr = herdr;
+    this.herdr = resolveExecutable(herdr);
+    this.workspace = workspace;
+    this.targets = [];
+    this.preparedAt = 0;
+    if (herdr && !this.herdr) throw new Error(`executable not found: ${herdr}`);
     this.sessions = new Map();
   }
 
-  attach(faceValue, slotValue, ws) {
+  async prepare() {
+    if (!this.herdr || Date.now() - this.preparedAt < 1000) return;
+    this.setTargets((await readHerdrState(this.herdr, this.workspace)).map(({ terminalId }) => terminalId));
+  }
+
+  setTargets(targets) {
+    const previous = this.targets;
+    this.targets = [...targets];
+    this.preparedAt = Date.now();
+    for (const session of [...this.sessions.values()]) {
+      if (previous[session.face] && previous[session.face] !== targets[session.face]) this.#closeSession(session);
+    }
+  }
+
+  async attach(faceValue, slotValue, ws) {
     const face = normalizeInteger(faceValue, FACE_MIN, FACE_MAX);
     const slot = normalizeInteger(slotValue, SLOT_MIN, SLOT_MAX);
+    await this.prepare();
     const session = this.#getSession(face, slot);
     if (session.history) send(ws, session.history);
     session.clients.add(ws);
@@ -44,36 +63,42 @@ export class TerminalGrid {
         return;
       }
 
-      try {
-        session.pty.resize(cols, rows);
-      } catch (error) {
-        send(ws, `\r\n\x1b[31m${error.message}\x1b[0m\r\n`);
+      if (!this.herdr) {
+        try {
+          session.pty.resize(cols, rows);
+        } catch (error) {
+          send(ws, `\r\n\x1b[31m${error.message}\x1b[0m\r\n`);
+        }
       }
     });
 
     ws.on('close', () => {
       session.clients.delete(ws);
+      if (!session.clients.size) this.#closeSession(session);
     });
 
     return { face, slot, sessionId: session.id };
   }
 
   closeAll() {
-    for (const session of this.sessions.values()) {
-      for (const client of session.clients) {
-        try {
-          client.close(1001, 'server shutdown');
-        } catch {
-          // Client may already be gone.
-        }
-      }
+    for (const session of [...this.sessions.values()]) this.#closeSession(session);
+  }
+
+  #closeSession(session) {
+    if (this.sessions.get(session.id) !== session) return;
+    this.sessions.delete(session.id);
+    for (const client of session.clients) {
       try {
-        session.pty.kill();
+        client.close(1001, 'terminal detached');
       } catch {
-        // PTY may already be dead.
+        // Client may already be gone.
       }
     }
-    this.sessions.clear();
+    try {
+      session.pty.kill();
+    } catch {
+      // PTY may already be dead.
+    }
   }
 
   #getSession(face, slot) {
@@ -81,23 +106,20 @@ export class TerminalGrid {
     const existing = this.sessions.get(id);
     if (existing) return existing;
 
+    const env = {
+      ...process.env,
+      TERM: 'xterm-256color',
+      COLORTERM: 'truecolor',
+      CMUX3D_FACE: String(face),
+      CMUX3D_SLOT: String(slot),
+      CMUX3D_SESSION: id,
+    };
+    for (const key of ['HERDR_ENV', 'HERDR_SOCKET_PATH', 'HERDR_PANE_ID', 'HERDR_TAB_ID']) delete env[key];
+
     const term = pty.spawn(
       this.herdr || this.shell,
-      this.herdr ? ['--session', HERDR_SESSIONS[face]] : [],
-      {
-        name: 'xterm-256color',
-        cols: 90,
-        rows: 28,
-        cwd: this.cwd,
-        env: {
-          ...process.env,
-          TERM: 'xterm-256color',
-          COLORTERM: 'truecolor',
-          CMUX3D_FACE: String(face),
-          CMUX3D_SLOT: String(slot),
-          CMUX3D_SESSION: id,
-        },
-      },
+      this.herdr ? ['--session', 'default', 'terminal', 'attach', this.targets[face]] : [],
+      { name: 'xterm-256color', cols: 90, rows: 28, cwd: this.cwd, env },
     );
 
     const session = {
@@ -117,7 +139,7 @@ export class TerminalGrid {
     });
 
     term.onExit(({ exitCode, signal }) => {
-      this.sessions.delete(id);
+      if (this.sessions.get(id) === session) this.sessions.delete(id);
       for (const client of session.clients) {
         send(client, `\r\n\x1b[31mprocess ended (${exitCode ?? signal}); reconnecting…\x1b[0m\r\n`);
         client.close(1012, 'shell exited');

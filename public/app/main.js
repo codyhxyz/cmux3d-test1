@@ -1,5 +1,7 @@
+import { companionHttp, hosted } from './connection.js';
 import { FACETS } from './facets.js';
 import { herdrMetadata } from './herdr.js';
+import { createHandTracking } from './hand-tracking.js';
 import { startShader } from './shader.js';
 import { momentumDuration, momentumSliderValue, SpaceController } from './space.js';
 import { TerminalFleet } from './terminals.js';
@@ -12,7 +14,19 @@ const opacityValue = document.getElementById('face-opacity-value');
 const momentumInput = document.getElementById('momentum-duration');
 const momentumValue = document.getElementById('momentum-duration-value');
 const gravityInput = document.getElementById('zero-gravity');
+const handInput = document.getElementById('hand-control');
+const handStatus = document.getElementById('hand-control-status');
+const handCamera = document.getElementById('hand-camera');
+const handVideo = document.getElementById('hand-video');
+const handSensitivity = document.getElementById('hand-sensitivity');
+const handSensitivityValue = document.getElementById('hand-sensitivity-value');
+const handCursors = new Map([...document.querySelectorAll('.hand-cursor')].map((cursor) => [cursor.dataset.hand, cursor]));
+const companionGate = document.getElementById('companion-gate');
+const companionConnect = document.getElementById('companion-connect');
+const companionStatus = document.getElementById('companion-status');
 const shader = startShader(document.getElementById('shader-field'));
+let connected = false;
+let herdrEvents;
 let herdrRefreshing = false;
 let herdrRefreshQueued = false;
 
@@ -33,24 +47,81 @@ const space = new SpaceController({
     updatePortState(null);
   },
 });
+const hands = createHandTracking({
+  video: handVideo,
+  onInput: (event) => space.dragInput(event),
+  onStatus(status, active) {
+    handStatus.value = status;
+    if (active === undefined) return;
+    handInput.checked = active;
+    document.body.classList.toggle('has-hand-control', active);
+  },
+  onFeedback({ id, state, visible, x, y }) {
+    const cursor = handCursors.get(id);
+    if (!cursor) return;
+    cursor.hidden = !visible;
+    if (!visible) return;
+    cursor.dataset.state = state;
+    cursor.style.setProperty('--hand-x', `${x * 100}vw`);
+    cursor.style.setProperty('--hand-y', `${y * 100}vh`);
+  },
+});
 
 renderFaces();
 renderPorts();
 space.bind();
-fleet.start();
-const herdrEvents = new EventSource('/api/herdr/events');
-herdrEvents.addEventListener('message', refreshHerdrState);
+if (hosted) companionGate.showModal();
+else connectCompanion();
+companionConnect.addEventListener('click', connectCompanion);
 momentumInput.value = String(momentumSliderValue(space.settleSeconds));
 gravityInput.checked = space.zeroGravity;
-fleet.setWindowActive(document.hasFocus());
 
 opacityInput.addEventListener('input', updateOpacity);
 momentumInput.addEventListener('input', updateMomentum);
 gravityInput.addEventListener('change', () => space.setZeroGravity(gravityInput.checked));
+handSensitivity.addEventListener('input', updateHandSensitivity);
+handInput.addEventListener('change', async () => {
+  if (!handInput.checked) {
+    hands.disable();
+    return;
+  }
+  handInput.disabled = true;
+  handInput.checked = await hands.enable(handCamera.value);
+  handInput.disabled = false;
+  await refreshCameras();
+});
+handCamera.addEventListener('change', async () => {
+  handCamera.disabled = true;
+  await hands.selectCamera(handCamera.value);
+  handCamera.disabled = false;
+});
+navigator.mediaDevices?.addEventListener('devicechange', refreshCameras);
+refreshCameras();
 window.addEventListener('focus', () => fleet.setWindowActive(true));
 window.addEventListener('blur', () => fleet.setWindowActive(false));
 updateOpacity();
 updateMomentumValue(space.settleSeconds);
+updateHandSensitivity();
+
+async function connectCompanion() {
+  if (connected) return;
+  companionConnect.disabled = true;
+  companionStatus.value = 'Connecting…';
+  try {
+    const response = await fetch(companionHttp('/health'));
+    if (!response.ok) throw new Error(response.status === 401 ? 'Pairing link required' : `Companion returned ${response.status}`);
+    connected = true;
+    fleet.start();
+    fleet.setWindowActive(document.hasFocus());
+    herdrEvents = new EventSource(companionHttp('/api/herdr/events'));
+    herdrEvents.addEventListener('message', refreshHerdrState);
+    companionGate.close();
+  } catch (error) {
+    companionStatus.value = `${error.message}. Start CMUX3D locally and use the page it opens; your browser may also ask for local-network access.`;
+  } finally {
+    companionConnect.disabled = false;
+  }
+}
 
 function renderFaces() {
   for (const facet of FACETS) {
@@ -79,6 +150,20 @@ function renderPorts() {
   }
 }
 
+async function refreshCameras() {
+  const selected = hands.cameraId() || handCamera.value;
+  try {
+    const devices = await hands.cameras();
+    handCamera.replaceChildren(...devices.map((device, index) => new Option(device.label || `Camera ${index + 1}`, device.deviceId)));
+    if (!devices.length) handCamera.append(new Option('Default camera', ''));
+    handCamera.disabled = !devices.length;
+    if (devices.some((device) => device.deviceId === selected)) handCamera.value = selected;
+  } catch {
+    handCamera.replaceChildren(new Option('Camera list unavailable', ''));
+    handCamera.disabled = true;
+  }
+}
+
 async function refreshHerdrState() {
   if (herdrRefreshing) {
     herdrRefreshQueued = true;
@@ -89,7 +174,7 @@ async function refreshHerdrState() {
   do {
     herdrRefreshQueued = false;
     try {
-      const response = await fetch('/api/herdr/state');
+      const response = await fetch(companionHttp('/api/herdr/state'));
       if (!response.ok) continue;
 
       for (const { face, snapshot } of await response.json()) {
@@ -141,4 +226,11 @@ function updateMomentumValue(seconds) {
   momentumValue.value = seconds < 1 ? '<1 sec' : minutes ? `${minutes} min${rounded % 60 ? ` ${rounded % 60} sec` : ''}` : `${rounded} sec`;
   momentumValue.textContent = momentumValue.value;
   momentumInput.setAttribute('aria-valuetext', momentumValue.value);
+}
+
+function updateHandSensitivity() {
+  const value = Number(handSensitivity.value);
+  hands.setSensitivity(value);
+  handSensitivityValue.value = `${value.toFixed(1)}×`;
+  handSensitivity.setAttribute('aria-valuetext', handSensitivityValue.value);
 }
