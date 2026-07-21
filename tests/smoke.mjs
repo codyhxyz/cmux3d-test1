@@ -6,6 +6,7 @@ import path from 'node:path';
 import WebSocket from 'ws';
 import { HandController, handSample } from '../public/app/hand-tracking.js';
 import { herdrMetadata } from '../public/app/herdr.js';
+import { commandKeyInput, commandPromptDirection, promptLine } from '../public/app/terminal-keys.js';
 import {
   DAMPING,
   DRAG_DAMPING,
@@ -27,6 +28,16 @@ import { createRuntime } from '../src/server/runtime.js';
 
 await checkHerdrStateEndpoint();
 await checkServerLifetime();
+
+assert.equal(commandKeyInput({ key: 'ArrowLeft', metaKey: true }), '\x01', 'command-left should move to the start of the shell input');
+assert.equal(commandKeyInput({ key: 'ArrowRight', metaKey: true }), '\x05', 'command-right should move to the end of the shell input');
+assert.equal(commandKeyInput({ key: 'Backspace', metaKey: true }), '\x15', 'command-backspace should delete to the start of the shell input');
+assert.equal(commandPromptDirection({ key: 'ArrowUp', metaKey: true }), -1, 'command-up should jump to the previous prompt');
+assert.equal(commandPromptDirection({ key: 'ArrowDown', metaKey: true }), 1, 'command-down should jump to the next prompt');
+assert.equal(promptLine([3, 11, 27], 20, -1), 11, 'previous prompt navigation should choose the nearest earlier prompt');
+assert.equal(promptLine([3, 11, 27], 20, 1), 27, 'next prompt navigation should choose the nearest later prompt');
+assert.equal(commandKeyInput({ key: 'a', metaKey: true }), undefined, 'xterm should retain its working command-A behavior');
+assert.equal(commandKeyInput({ key: 'ArrowLeft', altKey: true }), undefined, 'xterm should retain its working option-arrow behavior');
 
 assert.equal(browserOriginAllowed('https://cube.example', 'https://cube.example'), true, 'the configured hosted UI should reach the companion');
 assert.equal(browserOriginAllowed('https://evil.example', 'https://cube.example'), false, 'other hosted origins must not reach local shells');
@@ -144,6 +155,7 @@ try {
   const terminalSource = await script.text();
   assert.match(terminalSource, /AttachAddon/, 'official attach addon should be used');
   assert.match(terminalSource, /WebglAddon/, 'official WebGL addon should be used');
+  assert.match(terminalSource, /attachCustomKeyEventHandler/, 'terminal should install the command-key bindings');
   assert.match(terminalSource, /Math\.min\(1000 \* 2 \*\* entry\.failures\+\+, 60_000\)/, 'terminal retries should back off to a one-minute ceiling');
 
   const main = await fetch(`${httpBase}/app/main.js`);

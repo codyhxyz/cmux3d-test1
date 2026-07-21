@@ -1,5 +1,6 @@
 import { AttachAddon } from '/vendor/addon-attach.mjs';
 import { companionWebSocket } from './connection.js';
+import { commandKeyInput, commandPromptDirection, promptLine } from './terminal-keys.js';
 import { FitAddon } from '/vendor/addon-fit.mjs';
 import { WebglAddon } from '/vendor/addon-webgl.mjs';
 import { Terminal } from '/vendor/xterm.mjs';
@@ -26,6 +27,27 @@ export class TerminalFleet {
         lineHeight: 1.12,
         allowTransparency: true,
         theme: terminalTheme(facet),
+      });
+
+      const prompts = new Set();
+      // ponytail: Herdr exposes no prompt marks; track submissions from this page until it does.
+      term.onData((data) => {
+        if ((!data.includes('\r') && !data.includes('\n')) || term.buffer.active.type !== 'normal') return;
+        const marker = term.registerMarker();
+        if (!marker) return;
+        prompts.add(marker);
+        marker.onDispose(() => prompts.delete(marker));
+      });
+      term.attachCustomKeyEventHandler((event) => {
+        if (event.type !== 'keydown') return true;
+        const input = commandKeyInput(event);
+        const promptDirection = commandPromptDirection(event);
+        if (!input && !promptDirection) return true;
+        event.preventDefault();
+        event.stopPropagation();
+        if (input) term.input(input);
+        else jumpPrompt(term, prompts, promptDirection);
+        return false;
       });
 
       const fit = new FitAddon();
@@ -108,6 +130,15 @@ export class TerminalFleet {
     entry.ws.send(size.buffer);
   }
 
+}
+
+function jumpPrompt(term, prompts, direction) {
+  const buffer = term.buffer.active;
+  const atBottom = buffer.viewportY === buffer.baseY;
+  const anchor = atBottom ? buffer.baseY + buffer.cursorY : buffer.viewportY;
+  const target = promptLine([...prompts].filter((marker) => !marker.isDisposed).map((marker) => marker.line), anchor, direction);
+  if (target !== undefined) term.scrollToLine(target);
+  else if (direction > 0 && !atBottom) term.scrollToBottom();
 }
 
 function terminalTheme(facet) {
