@@ -31,31 +31,7 @@ export function createRuntime(options = {}) {
     options.token,
   ));
   const socketServer = mountTerminalSocket(server, terminalGrid, options.webOrigin, options.token);
-  const startupIdleMs = options.startupIdleMs ?? 60_000;
-  const disconnectedIdleMs = options.disconnectedIdleMs ?? 10_000;
-  let idleTimer;
   let stopPromise;
-
-  const clearIdleTimer = () => {
-    clearTimeout(idleTimer);
-    idleTimer = undefined;
-  };
-  const armIdleTimer = (delay) => {
-    clearIdleTimer();
-    idleTimer = setTimeout(async () => {
-      if (socketServer.clients.size) return;
-      await runtime.stop();
-      options.onIdle?.();
-    }, delay);
-    idleTimer.unref();
-  };
-
-  socketServer.on('connection', (client) => {
-    clearIdleTimer();
-    client.once('close', () => queueMicrotask(() => {
-      if (!socketServer.clients.size) armIdleTimer(disconnectedIdleMs);
-    }));
-  });
 
   const runtime = {
     server,
@@ -70,7 +46,6 @@ export function createRuntime(options = {}) {
         };
         const onListening = () => {
           server.off('error', onError);
-          armIdleTimer(startupIdleMs);
           resolve(this.address());
         };
         server.once('error', onError);
@@ -85,7 +60,6 @@ export function createRuntime(options = {}) {
     },
     stop() {
       if (stopPromise) return stopPromise;
-      clearIdleTimer();
       terminalGrid.closeAll();
       for (const client of socketServer.clients) client.terminate();
       socketServer.close();

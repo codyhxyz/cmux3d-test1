@@ -1,7 +1,7 @@
 const terminalTheme = {
   background: 'transparent',
-  foreground: '#e7e5f3',
-  cursor: '#76e5bd',
+  foreground: '#e7edf5',
+  cursor: '#64c7e8',
 };
 
 export const FACETS = [

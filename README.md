@@ -9,7 +9,7 @@ npm install
 npm start
 ```
 
-`npm start` opens the hosted interface with a one-time pairing token; HerdR, Pi, terminals, and files remain on the local machine. The local-only fallback is <http://127.0.0.1:8064/>. Set `CMUX3D_OPEN=0` to prevent auto-opening. The companion exits ten seconds after the last cube disconnects (or after one minute if none connects).
+`npm start` opens <https://codingcube.codyh.xyz> with a one-time pairing token; HerdR, Pi, terminals, and files remain on the local machine. The local-only fallback is <http://127.0.0.1:8064/>. Set `CMUX3D_OPEN=0` to prevent auto-opening.
 
 To use another working directory or a local-only custom port:
 

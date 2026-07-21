@@ -1,4 +1,5 @@
 import { AttachAddon } from '/vendor/addon-attach.mjs';
+import { isPageActive } from './activity.js';
 import { companionWebSocket } from './connection.js';
 import { commandKeyInput, commandPromptDirection, promptLine } from './terminal-keys.js';
 import { FitAddon } from '/vendor/addon-fit.mjs';
@@ -63,14 +64,11 @@ export class TerminalFleet {
       }
       term.write(`\x1b[36mopening ${facet.name.toLowerCase()} channel…\x1b[0m\r\n`);
 
-      const entry = { facet, host, term, fit, ws: null, failures: 0, openedAt: 0 };
+      const entry = { facet, term, fit, ws: null, failures: 0, openedAt: 0 };
       this.entries.set(facet.face, entry);
       this.resizeObserver.observe(host);
-      this.#connect(entry);
+      if (isPageActive()) this.#connect(entry);
     }
-
-    window.addEventListener('resize', () => this.fitAll());
-    setTimeout(() => this.fitAll(), 150);
   }
 
   focus(face) {
@@ -95,21 +93,33 @@ export class TerminalFleet {
   }
 
   setWindowActive(active) {
-    for (const { term } of this.entries.values()) term.options.cursorBlink = active;
+    for (const entry of this.entries.values()) {
+      entry.term.options.cursorBlink = active;
+      if (active && !entry.ws) this.#connect(entry);
+      if (!active && entry.ws) {
+        const ws = entry.ws;
+        entry.ws = null;
+        ws.close();
+      }
+    }
   }
 
   #connect(entry) {
     const ws = new WebSocket(companionWebSocket(`/ws/pty?face=${entry.facet.face}&slot=${this.slot}`));
+    let attach;
     entry.ws = ws;
 
     ws.addEventListener('open', () => {
       entry.openedAt = Date.now();
-      entry.term.loadAddon(new AttachAddon(ws));
+      attach = new AttachAddon(ws);
+      entry.term.loadAddon(attach);
       this.#sendSize(entry);
     });
 
     ws.addEventListener('close', (event) => {
+      attach?.dispose();
       if (entry.ws !== ws) return;
+      entry.ws = null;
       if (event.code === 1011) {
         entry.term.write('\r\n\x1b[31mterminal unavailable; restart the server to retry\x1b[0m\r\n');
         return;
@@ -117,7 +127,9 @@ export class TerminalFleet {
       if (Date.now() - entry.openedAt >= 30_000) entry.failures = 0;
       const delay = Math.min(1000 * 2 ** entry.failures++, 60_000);
       entry.term.write(`\r\n\x1b[33mchannel closed; retrying in ${Math.ceil(delay / 1000)}s…\x1b[0m\r\n`);
-      setTimeout(() => this.#connect(entry), delay);
+      setTimeout(() => {
+        if (isPageActive() && !entry.ws) this.#connect(entry);
+      }, delay);
     });
   }
 

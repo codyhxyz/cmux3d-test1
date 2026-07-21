@@ -63,12 +63,10 @@ export class TerminalGrid {
         return;
       }
 
-      if (!this.herdr) {
-        try {
-          session.pty.resize(cols, rows);
-        } catch (error) {
-          send(ws, `\r\n\x1b[31m${error.message}\x1b[0m\r\n`);
-        }
+      try {
+        session.pty.resize(cols, rows);
+      } catch (error) {
+        send(ws, `\r\n\x1b[31m${error.message}\x1b[0m\r\n`);
       }
     });
 

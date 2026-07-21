@@ -54,12 +54,12 @@ const fragmentSource = (derivatives) => `
     float grid = smoothstep(0.5 - ${derivatives ? 'max(fwidth(edge) * 1.25, 0.003)' : '0.01'}, 0.5, edge);
     grid *= smoothstep(-1.15, -0.8, uv.y) * (1.0 - smoothstep(-0.3, 0.1, uv.y));
 
-    vec3 black = vec3(0.018, 0.018, 0.028);
-    vec3 violet = vec3(0.31, 0.22, 0.68);
-    vec3 mint = vec3(0.20, 0.72, 0.56);
+    vec3 black = vec3(0.018, 0.024, 0.032);
+    vec3 steel = vec3(0.22, 0.40, 0.58);
+    vec3 signal = vec3(0.28, 0.66, 0.80);
     vec3 color = black;
-    color += violet * (mist * 0.105 + beam * 0.07);
-    color += mint * (grid * 0.055 + cursor * 0.035 + u_focus * beam * 0.025);
+    color += steel * (mist * 0.09 + beam * 0.055);
+    color += signal * (grid * 0.035 + cursor * 0.025 + u_focus * beam * 0.02);
     color *= 1.0 - 0.24 * smoothstep(0.45, 1.35, length(uv));
     color += (hash(gl_FragCoord.xy) - 0.5) / 255.0;
 

@@ -133,7 +133,7 @@ export class SpaceController {
     this.inertia = false;
     this.#pause();
     this.rotation = { ...facet.view };
-    this.zoom = Math.max(this.zoom, 1.08);
+    this.zoom = 1.08;
     this.#markPanels();
     this.#apply(true);
     this.onFocus(face);

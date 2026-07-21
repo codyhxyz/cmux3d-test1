@@ -27,7 +27,6 @@ import { browserOriginAllowed } from '../src/server/origin.js';
 import { createRuntime } from '../src/server/runtime.js';
 
 await checkHerdrStateEndpoint();
-await checkServerLifetime();
 
 assert.equal(commandKeyInput({ key: 'ArrowLeft', metaKey: true }), '\x01', 'command-left should move to the start of the shell input');
 assert.equal(commandKeyInput({ key: 'ArrowRight', metaKey: true }), '\x05', 'command-right should move to the end of the shell input');
@@ -66,9 +65,12 @@ const fistHand = trackedHand('fist');
 const openSample = handSample(openHand);
 const pinchSample = handSample(pinchedHand);
 const fistSample = handSample(fistHand);
-assert.ok(openSample.pinch > 0.4 && openSample.eligible, 'a recorded open hand should be a release posture');
-assert.ok(pinchSample.pinch < 0.08 && pinchSample.eligible, 'a recorded thumb-index pinch should be grabbable');
-assert.ok(Math.abs(handSample(trackedHand('pinch', 0.2, 0.1, 0.5)).pinch - pinchSample.pinch) < 1e-6, 'pinch strength should be independent of camera position and hand size');
+assert.ok(openSample.pinch > 1.5 && openSample.eligible, 'a recorded open hand should be a release posture');
+assert.ok(pinchSample.pinch < 0.8 && pinchSample.eligible, 'a recorded thumb-index pinch should be grabbable');
+assert.ok(Math.abs(handSample(trackedHand('pinch', 0.2, 0.1, 0.5)).pinch - pinchSample.pinch) < 1e-6, '3D pinch strength should be independent of camera position and hand size');
+const distortedPinch = trackedHand('pinch');
+distortedPinch.landmarks[8].x += 0.3;
+assert.equal(handSample(distortedPinch).pinch, pinchSample.pinch, 'pinch should prefer MediaPipe world landmarks over the 2D projection');
 assert.equal(fistSample.eligible, false, 'a closed fist should not masquerade as a pinch');
 
 const actions = [];
@@ -145,7 +147,9 @@ try {
   assert.match(homeSource, /momentum-duration/, 'settings should expose the momentum slider');
   assert.match(homeSource, /zero-gravity/, 'settings should expose the zero-gravity toggle');
   assert.match(homeSource, /hand-control/, 'settings should expose the opt-in hand control');
-  assert.match(homeSource, /companion-gate/, 'the hosted UI should explain local companion pairing');
+  assert.match(homeSource, /Open CMUX3D locally/, 'failed hosted pairing should offer the local workspace');
+  assert.match(homeSource, /id="companion-status"[^>]*hidden/, 'automatic pairing should use a transient connection status');
+  assert.doesNotMatch(homeSource, /HerdR, Pi, terminals/, 'the connection UI should not explain internal architecture');
   assert.equal(homeSource.match(/class="hand-cursor"/g)?.length, 2, 'the UI should expose one marker per tracked hand');
   const styles = await (await fetch(`${httpBase}/styles.css`)).text();
   assert.match(styles, /\.hand-cursor\[data-state="ineligible"\]::after[^}]*content:\s*"Open fingers"/s, 'a rejected pinch should explain how to become eligible');
@@ -157,11 +161,15 @@ try {
   assert.match(terminalSource, /WebglAddon/, 'official WebGL addon should be used');
   assert.match(terminalSource, /attachCustomKeyEventHandler/, 'terminal should install the command-key bindings');
   assert.match(terminalSource, /Math\.min\(1000 \* 2 \*\* entry\.failures\+\+, 60_000\)/, 'terminal retries should back off to a one-minute ceiling');
+  assert.match(terminalSource, /entry\.ws = null;\s*ws\.close\(\)/, 'an inactive browser should release terminal sizing back to Ghostty');
 
   const main = await fetch(`${httpBase}/app/main.js`);
   assert.equal(main.status, 200, 'main client should be served');
   const mainSource = await main.text();
   assert.match(mainSource, /new EventSource\(companionHttp\('\/api\/herdr\/events'\)\)/, 'the UI should subscribe to HerdR events');
+  assert.match(mainSource, /space\.bind\(\);\s*connectCompanion\(\);/, 'the paired launch should connect without another click');
+  assert.match(mainSource, /if \(!companionGate\.open\) companionGate\.showModal\(\)/, 'the recovery screen should appear only after connection failure');
+  assert.doesNotMatch(mainSource, /companionConnect/, 'the removed connection gate should leave no dead button code');
   assert.doesNotMatch(mainSource, /setInterval/, 'HerdR state should not be polled');
 
   const shader = await fetch(`${httpBase}/app/shader.js`);
@@ -180,6 +188,7 @@ try {
   assert.match(handWorkerSource, /HandLandmarker/, 'the worker should use landmark-only hand inference');
   assert.match(handWorkerSource, /detectForVideo/, 'hand inference should process video frames in the worker');
   assert.match(handWorkerSource, /numHands: 2/, 'the existing model should expose both hands');
+  assert.match(handWorkerSource, /worldLandmarks: result\.worldLandmarks/, 'the worker should preserve MediaPipe 3D landmarks');
   assert.match(handWorkerSource, /handedness: result\.handedness/, 'hand identity should come from MediaPipe');
   assert.doesNotMatch(handWorkerSource, /result\.landmarks\[0\]/, 'the worker should not discard the second hand');
   assert.doesNotMatch(handWorkerSource, /GestureRecognizer/, 'unused canned gesture classification should not run');
@@ -327,7 +336,7 @@ fi
     const face = await openPty(wsBase, 2, 0);
     await face.waitFor('attached:term-2');
     face.input('cube-probe\r');
-    await face.waitFor('echo:cube-probe:size:28 90');
+    await face.waitFor('echo:cube-probe:size:24 80');
 
     const events = await fetch(`${httpBase}/api/herdr/events`);
     assert.equal(events.status, 200, 'HerdR event stream should be exposed');
@@ -377,32 +386,6 @@ fi
     if (previousState === undefined) delete process.env.CMUX3D_TEST_HERDR_STATE;
     else process.env.CMUX3D_TEST_HERDR_STATE = previousState;
     await rm(directory, { recursive: true, force: true });
-  }
-}
-
-async function checkServerLifetime() {
-  let markIdle;
-  const idled = new Promise((resolve) => { markIdle = resolve; });
-  const runtime = createRuntime({
-    host: '127.0.0.1',
-    port: 0,
-    shell: '/bin/sh',
-    startupIdleMs: 1_000,
-    disconnectedIdleMs: 25,
-    onIdle: markIdle,
-  });
-
-  try {
-    const { host, port } = await runtime.start();
-    const client = await openPty(`ws://${host}:${port}`, 0, 0);
-    client.close();
-    await Promise.race([
-      idled,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('cube server did not stop after its last client closed')), 1_000)),
-    ]);
-    assert.equal(runtime.address(), null, 'the disposable cube server should close with its last cube client');
-  } finally {
-    await runtime.stop();
   }
 }
 
@@ -471,6 +454,7 @@ function checkTwoInputSpace() {
     space.focus(0);
     panelClasses.remove('is-focused');
     const focusedZoom = space.zoom;
+    assert.equal(focusedZoom, 1.08, 'focusing should reset oversized cube zoom so the terminal fits the viewport');
     let prevented = false;
     listeners.get('wheel')({ target, deltaY: 100, preventDefault() { prevented = true; } });
     assert.equal(space.zoom, focusedZoom, 'focused terminal state should own wheel input even when its DOM class is stale');
@@ -514,7 +498,8 @@ function classList() {
 
 function trackedHand(name, dx = 0, dy = 0, scale = 1) {
   return {
-    landmarks: handFixtures[name].map((point) => ({ ...point, x: point.x * scale + dx, y: point.y * scale + dy })),
+    landmarks: handFixtures[name].map((point) => ({ ...point, x: point.x * scale + dx, y: point.y * scale + dy, z: point.z * scale })),
+    worldLandmarks: handFixtures[name].map(({ x, y, z }) => ({ x: x * scale, y: y * scale, z: z * scale })),
   };
 }
 

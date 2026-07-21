@@ -3,7 +3,7 @@ import { isPageActive, onPageActivity } from './activity.js';
 const PALM_LANDMARKS = [0, 5, 9, 13, 17];
 const OPEN_FINGERS = [[9, 10, 12], [13, 14, 16], [17, 18, 20]];
 const MIN_HAND_SIZE = 0.08;
-const MIN_OPEN_PINCH = 0.24;
+const MIN_OPEN_PINCH = 1;
 const ARM_MS = 120;
 const GRAB_MS = 80;
 const RELEASE_MS = 50;
@@ -25,19 +25,23 @@ const STATUS_PRIORITY = ['grabbed', 'pinching', 'reacquiring', 'ready', 'ineligi
 
 export function handSample(result) {
   const landmarks = result?.landmarks;
-  if (!landmarks || landmarks.length < 21 || landmarks.some((point) => !Number.isFinite(point?.x) || !Number.isFinite(point?.y))) return null;
+  if (!validLandmarks(landmarks)) return null;
 
   const xs = landmarks.map(({ x }) => x);
   const ys = landmarks.map(({ y }) => y);
   const handSize = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
   if (handSize < MIN_HAND_SIZE) return null;
 
+  const geometry = validLandmarks(result.worldLandmarks, true) ? result.worldLandmarks : landmarks;
+  const palmWidth = distance(geometry[5], geometry[17]);
+  if (!palmWidth) return null;
+
   const palm = average(PALM_LANDMARKS.map((index) => landmarks[index]));
-  const extended = OPEN_FINGERS.filter(([base, joint, tip]) => jointCosine(landmarks[base], landmarks[joint], landmarks[tip]) < -0.8).length;
+  const extended = OPEN_FINGERS.filter(([base, joint, tip]) => jointCosine(geometry[base], geometry[joint], geometry[tip]) < -0.8).length;
   return {
     x: clamp(1 - palm.x, 0, 1),
     y: clamp(palm.y, 0, 1),
-    pinch: distance2d(landmarks[4], landmarks[8]) / handSize,
+    pinch: distance(geometry[4], geometry[8]) / palmWidth,
     eligible: extended >= 2,
   };
 }
@@ -63,7 +67,6 @@ export class HandController {
     if (!sample) return this.#missing(time);
 
     const recovering = this.lostSince !== null;
-    this.lastSeen = time;
     this.lostSince = null;
 
     if (recovering || !this.lastPoint) {
@@ -147,7 +150,6 @@ export class HandController {
     this.baseline = null;
     this.pinchSince = null;
     this.releaseSince = null;
-    this.lastSeen = null;
     this.lostSince = null;
     this.lastPoint = null;
     this.xFilter.reset();
@@ -162,11 +164,11 @@ export class HandController {
   }
 
   #grabThreshold() {
-    return clamp(this.baseline * 0.4, 0.1, 0.18);
+    return this.baseline * 0.4;
   }
 
   #releaseThreshold() {
-    return clamp(this.baseline * 0.65, 0.2, 0.32);
+    return this.baseline * 0.65;
   }
 
   #move(dx, dy, time) {
@@ -183,7 +185,7 @@ export class HandController {
   }
 
   #missing(time) {
-    if (this.lastSeen === null) {
+    if (!this.lastPoint) {
       this.onFeedback({ id: this.id, state: 'searching', visible: false, dragging: false });
       return;
     }
@@ -251,7 +253,7 @@ export function createHandTracking({ video, onInput, onStatus = () => {}, onFeed
     enabled = true;
     generation += 1;
     lastState = '';
-    running = null;
+    running = false;
     onStatus('Starting…', true);
 
     try {
@@ -370,12 +372,9 @@ export function createHandTracking({ video, onInput, onStatus = () => {}, onFeed
 
     const detected = new Map((data.handedness || []).map((categories, index) => [
       categories[0]?.categoryName?.toLowerCase(),
-      data.landmarks?.[index],
+      { landmarks: data.landmarks?.[index], worldLandmarks: data.worldLandmarks?.[index] },
     ]));
-    for (const [handedness, controller] of controllers) {
-      const landmarks = detected.get(handedness);
-      controller.update(landmarks ? { landmarks } : null, data.timestamp);
-    }
+    for (const [handedness, controller] of controllers) controller.update(detected.get(handedness), data.timestamp);
     updateStatus();
   }
 
@@ -502,16 +501,23 @@ function average(points) {
   return { x: total.x / points.length, y: total.y / points.length };
 }
 
-function distance2d(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
+function validLandmarks(landmarks, requireDepth = false) {
+  return landmarks?.length >= 21 && !landmarks.some((point) =>
+    !Number.isFinite(point?.x) || !Number.isFinite(point?.y) || (requireDepth && !Number.isFinite(point?.z)));
+}
+
+function distance(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0));
 }
 
 function jointCosine(a, joint, b) {
   const ax = a.x - joint.x;
   const ay = a.y - joint.y;
+  const az = (a.z || 0) - (joint.z || 0);
   const bx = b.x - joint.x;
   const by = b.y - joint.y;
-  return (ax * bx + ay * by) / Math.hypot(ax, ay) / Math.hypot(bx, by);
+  const bz = (b.z || 0) - (joint.z || 0);
+  return (ax * bx + ay * by + az * bz) / Math.hypot(ax, ay, az) / Math.hypot(bx, by, bz);
 }
 
 function median(values) {

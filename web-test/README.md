@@ -17,7 +17,7 @@ Cloudflare Pages settings:
 
 ## Use
 
-Run `npm start` from CMUX3D. The companion generates a short-lived pairing token and opens <https://cmux3d-web-test.pages.dev>. The deployed page must receive browser permission to access the local network. If that permission is unavailable, use <http://127.0.0.1:8064/> instead.
+Run `npm start` from CMUX3D. The companion generates a short-lived pairing token and opens <https://codingcube.codyh.xyz>. The deployed page must receive browser permission to access the local network. If that permission is unavailable, use <http://127.0.0.1:8064/> instead.
 
 The companion:
 
@@ -26,4 +26,4 @@ The companion:
 - requires the generated pairing token from the hosted origin;
 - keeps terminal and HerdR traffic local unless a relay is deliberately added later.
 
-Override the hosted origin with `CMUX3D_WEB_ORIGIN`; set `CMUX3D_OPEN=0` to disable auto-opening.
+Cloudflare Pages project `cmux3d-web-test` serves the custom domain. Override the hosted origin with `CMUX3D_WEB_ORIGIN`; set `CMUX3D_OPEN=0` to disable auto-opening.

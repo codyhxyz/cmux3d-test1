@@ -23,11 +23,9 @@ const handSensitivity = document.getElementById('hand-sensitivity');
 const handSensitivityValue = document.getElementById('hand-sensitivity-value');
 const handCursors = new Map([...document.querySelectorAll('.hand-cursor')].map((cursor) => [cursor.dataset.hand, cursor]));
 const companionGate = document.getElementById('companion-gate');
-const companionConnect = document.getElementById('companion-connect');
 const companionStatus = document.getElementById('companion-status');
 const companionLocal = document.getElementById('companion-local');
 const shader = startShader(document.getElementById('shader-field'));
-let connected = false;
 let herdrEvents;
 let herdrRefreshing = false;
 let herdrRefreshQueued = false;
@@ -73,9 +71,7 @@ companionLocal.href = companionHttp('/');
 renderFaces();
 renderPorts();
 space.bind();
-if (hosted) companionGate.showModal();
-else connectCompanion();
-companionConnect.addEventListener('click', connectCompanion);
+connectCompanion();
 momentumInput.value = String(momentumSliderValue(space.settleSeconds));
 gravityInput.checked = space.zeroGravity;
 
@@ -106,22 +102,18 @@ updateMomentumValue(space.settleSeconds);
 updateHandSensitivity();
 
 async function connectCompanion() {
-  if (connected) return;
-  companionConnect.disabled = true;
-  companionStatus.value = 'Connecting…';
+  companionStatus.hidden = !hosted;
   try {
     const response = await fetch(companionHttp('/health'));
-    if (!response.ok) throw new Error(response.status === 401 ? 'Pairing link required' : `Companion returned ${response.status}`);
-    connected = true;
+    if (!response.ok) throw new Error();
     fleet.start();
     fleet.setWindowActive(isPageActive());
     herdrEvents = new EventSource(companionHttp('/api/herdr/events'));
     herdrEvents.addEventListener('message', refreshHerdrState);
-    companionGate.close();
-  } catch (error) {
-    companionStatus.value = `${error.message}. Start CMUX3D locally and use the page it opens; your browser may also ask for local-network access.`;
+  } catch {
+    if (!companionGate.open) companionGate.showModal();
   } finally {
-    companionConnect.disabled = false;
+    companionStatus.hidden = true;
   }
 }
 

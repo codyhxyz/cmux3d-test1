@@ -17,6 +17,7 @@ self.addEventListener('message', ({ data }) => {
       timestamp: data.timestamp,
       generation: data.generation,
       landmarks: result.landmarks,
+      worldLandmarks: result.worldLandmarks,
       handedness: result.handedness,
     });
   } catch (error) {

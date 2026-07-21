@@ -3,13 +3,7 @@ import { readServerOptions } from './config.js';
 import { createRuntime } from './runtime.js';
 
 const options = readServerOptions();
-const runtime = createRuntime({
-  ...options,
-  onIdle() {
-    console.log('cmux3d closed after its last cube disconnected');
-    process.exit(0);
-  },
-});
+const runtime = createRuntime(options);
 
 runtime.start().then(({ host, port }) => {
   const localUrl = `http://${host}:${port}/`;
