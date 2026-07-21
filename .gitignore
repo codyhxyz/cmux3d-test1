@@ -5,3 +5,4 @@ server.pid
 .DS_Store
 .env
 coverage/
+apple/CMUXGestures/build/

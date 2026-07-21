@@ -1,0 +1,469 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		10F9F35C25CEE59E79D3094A /* GestureEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15398107BA5F62AE59882011 /* GestureEngineTests.swift */; };
+		126BF07F5616C9B089A91A99 /* CMUXGesturesWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC9A14EBCAE97BC8DB37130C /* CMUXGesturesWatchApp.swift */; };
+		55B82934A2A855B5F079A581 /* CameraTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CBFC08A6F5C9BB97A698C3F /* CameraTracker.swift */; };
+		68B25B4BAAF3BF93B5B954D6 /* CMUXGesturesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E54F220507079F24D9269C8E /* CMUXGesturesApp.swift */; };
+		CDE93EB967BAECC9226F39B0 /* GestureModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFBA2E776A5F674B3A5DAA8C /* GestureModel.swift */; };
+		EE944F5BEA884DBA81CFD09C /* GestureEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0F6903894EADB77D9438B3C /* GestureEngine.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		C004E11B10F4F940ECB8EF8E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A97488A56AB92E63E15EA96A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E23C0DE8AEB5E03974AD4D6D;
+			remoteInfo = CMUXGestures;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		0CBFC08A6F5C9BB97A698C3F /* CameraTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraTracker.swift; sourceTree = "<group>"; };
+		15398107BA5F62AE59882011 /* GestureEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureEngineTests.swift; sourceTree = "<group>"; };
+		6A0DA06044AB86FD62A30055 /* CMUXGestures.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CMUXGestures.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8F901F40721464F4BB83393F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		96D11284B14068615977370A /* CMUXGesturesTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CMUXGesturesTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AC9A14EBCAE97BC8DB37130C /* CMUXGesturesWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CMUXGesturesWatchApp.swift; sourceTree = "<group>"; };
+		C0F6903894EADB77D9438B3C /* GestureEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureEngine.swift; sourceTree = "<group>"; };
+		DC6B355533A28B71BAE16345 /* CMUXGesturesWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CMUXGesturesWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DFBA2E776A5F674B3A5DAA8C /* GestureModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureModel.swift; sourceTree = "<group>"; };
+		E54F220507079F24D9269C8E /* CMUXGesturesApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CMUXGesturesApp.swift; sourceTree = "<group>"; };
+		F9BA443C89BF5519E57219E8 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		376CEFBE85DF4871427901D4 /* Watch */ = {
+			isa = PBXGroup;
+			children = (
+				AC9A14EBCAE97BC8DB37130C /* CMUXGesturesWatchApp.swift */,
+				8F901F40721464F4BB83393F /* Info.plist */,
+			);
+			path = Watch;
+			sourceTree = "<group>";
+		};
+		47C0FF91DF8E1154B8AF4894 /* PhoneTests */ = {
+			isa = PBXGroup;
+			children = (
+				15398107BA5F62AE59882011 /* GestureEngineTests.swift */,
+			);
+			path = PhoneTests;
+			sourceTree = "<group>";
+		};
+		4E8D29FA72AECDB7A1F0096D /* Phone */ = {
+			isa = PBXGroup;
+			children = (
+				0CBFC08A6F5C9BB97A698C3F /* CameraTracker.swift */,
+				E54F220507079F24D9269C8E /* CMUXGesturesApp.swift */,
+				C0F6903894EADB77D9438B3C /* GestureEngine.swift */,
+				DFBA2E776A5F674B3A5DAA8C /* GestureModel.swift */,
+				F9BA443C89BF5519E57219E8 /* Info.plist */,
+			);
+			path = Phone;
+			sourceTree = "<group>";
+		};
+		96828C5B910E9BF5401E3F6D /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				6A0DA06044AB86FD62A30055 /* CMUXGestures.app */,
+				96D11284B14068615977370A /* CMUXGesturesTests.xctest */,
+				DC6B355533A28B71BAE16345 /* CMUXGesturesWatch.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		EB44CF614968C002C70C648B = {
+			isa = PBXGroup;
+			children = (
+				4E8D29FA72AECDB7A1F0096D /* Phone */,
+				47C0FF91DF8E1154B8AF4894 /* PhoneTests */,
+				376CEFBE85DF4871427901D4 /* Watch */,
+				96828C5B910E9BF5401E3F6D /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		328CDA5A1BC7413A04EC9122 /* CMUXGesturesTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8700D5F17D1B67BB057BAE31 /* Build configuration list for PBXNativeTarget "CMUXGesturesTests" */;
+			buildPhases = (
+				38B877F1B105E01B6D2D11C3 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				7868DB8689F62E1D5D7587C3 /* PBXTargetDependency */,
+			);
+			name = CMUXGesturesTests;
+			packageProductDependencies = (
+			);
+			productName = CMUXGesturesTests;
+			productReference = 96D11284B14068615977370A /* CMUXGesturesTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		A968C07FA8CF06D6FB255688 /* CMUXGesturesWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7371CECB078D9DCC64B6619B /* Build configuration list for PBXNativeTarget "CMUXGesturesWatch" */;
+			buildPhases = (
+				5291A4967FBA12742399D314 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CMUXGesturesWatch;
+			packageProductDependencies = (
+			);
+			productName = CMUXGesturesWatch;
+			productReference = DC6B355533A28B71BAE16345 /* CMUXGesturesWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
+		E23C0DE8AEB5E03974AD4D6D /* CMUXGestures */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 90A8A2FEA70F4F6D31962DF4 /* Build configuration list for PBXNativeTarget "CMUXGestures" */;
+			buildPhases = (
+				BFC0DA2DEA10C10A23C6874F /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CMUXGestures;
+			packageProductDependencies = (
+			);
+			productName = CMUXGestures;
+			productReference = 6A0DA06044AB86FD62A30055 /* CMUXGestures.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A97488A56AB92E63E15EA96A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = 3063FBBDDC3174CA96306D21 /* Build configuration list for PBXProject "CMUXGestures" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = EB44CF614968C002C70C648B;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				E23C0DE8AEB5E03974AD4D6D /* CMUXGestures */,
+				328CDA5A1BC7413A04EC9122 /* CMUXGesturesTests */,
+				A968C07FA8CF06D6FB255688 /* CMUXGesturesWatch */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		38B877F1B105E01B6D2D11C3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				10F9F35C25CEE59E79D3094A /* GestureEngineTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5291A4967FBA12742399D314 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				126BF07F5616C9B089A91A99 /* CMUXGesturesWatchApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BFC0DA2DEA10C10A23C6874F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				68B25B4BAAF3BF93B5B954D6 /* CMUXGesturesApp.swift in Sources */,
+				55B82934A2A855B5F079A581 /* CameraTracker.swift in Sources */,
+				EE944F5BEA884DBA81CFD09C /* GestureEngine.swift in Sources */,
+				CDE93EB967BAECC9226F39B0 /* GestureModel.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		7868DB8689F62E1D5D7587C3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E23C0DE8AEB5E03974AD4D6D /* CMUXGestures */;
+			targetProxy = C004E11B10F4F940ECB8EF8E /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		0E2B89C05CBBB5479B81742A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.codyhxyz.cmuxgestures.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CMUXGestures.app/CMUXGestures";
+			};
+			name = Release;
+		};
+		398BFEE936671C1EEDB88349 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.codyhxyz.cmuxgestures.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CMUXGestures.app/CMUXGestures";
+			};
+			name = Debug;
+		};
+		4DB78E693D0570CE2D4EB6A3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 0.1;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Release;
+		};
+		7C3DC9F003BC6BA4B983AD89 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				INFOPLIST_FILE = Watch/Info.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = com.codyhxyz.cmuxgestures.watchkitapp;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+			};
+			name = Release;
+		};
+		87D79CE72E01F011F719EC1E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 0.1;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Debug;
+		};
+		CE2FD3C1C2CCB280DBFBECCE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = Phone/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.codyhxyz.cmuxgestures;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		D6712135FA923E7C1AA9DBF7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				INFOPLIST_FILE = Watch/Info.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = com.codyhxyz.cmuxgestures.watchkitapp;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+			};
+			name = Debug;
+		};
+		DF67CB74AD75D17CA9ED2A57 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = Phone/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.codyhxyz.cmuxgestures;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		3063FBBDDC3174CA96306D21 /* Build configuration list for PBXProject "CMUXGestures" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				87D79CE72E01F011F719EC1E /* Debug */,
+				4DB78E693D0570CE2D4EB6A3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		7371CECB078D9DCC64B6619B /* Build configuration list for PBXNativeTarget "CMUXGesturesWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D6712135FA923E7C1AA9DBF7 /* Debug */,
+				7C3DC9F003BC6BA4B983AD89 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		8700D5F17D1B67BB057BAE31 /* Build configuration list for PBXNativeTarget "CMUXGesturesTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				398BFEE936671C1EEDB88349 /* Debug */,
+				0E2B89C05CBBB5479B81742A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		90A8A2FEA70F4F6D31962DF4 /* Build configuration list for PBXNativeTarget "CMUXGestures" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CE2FD3C1C2CCB280DBFBECCE /* Debug */,
+				DF67CB74AD75D17CA9ED2A57 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A97488A56AB92E63E15EA96A /* Project object */;
+}
