@@ -1,20 +1,28 @@
 import { AttachAddon } from '/vendor/addon-attach.mjs';
 import { isPageActive } from './activity.js';
-import { companionWebSocket } from './connection.js';
-import { commandKeyInput, commandPromptDirection, promptLine } from './terminal-keys.js';
+import { hostWebSocket } from './connection.js';
+import { accessoryKeyInput, commandKeyInput, commandPromptDirection, ctrlCode, promptLine } from './terminal-keys.js';
 import { FitAddon } from '/vendor/addon-fit.mjs';
 import { WebglAddon } from '/vendor/addon-webgl.mjs';
 import { Terminal } from '/vendor/xterm.mjs';
 import { FACETS } from './facets.js';
 
 export class TerminalFleet {
-  constructor({ slot = 0 } = {}) {
+  constructor({ slot = 0, onConnection = () => {}, onCtrlChange = () => {} } = {}) {
     this.slot = slot;
     this.entries = new Map();
     this.resizeObserver = new ResizeObserver(() => this.fitAll());
+    this.onConnection = onConnection;
+    this.onCtrlChange = onCtrlChange;
+    this.focusedFace = null;
+    this.ctrlArmed = false;
+    this.openCount = 0;
+    this.started = false;
   }
 
   start() {
+    if (this.started) return;
+    this.started = true;
     for (const facet of FACETS) {
       const host = document.getElementById(`terminal-${facet.face}`);
       if (!host) continue;
@@ -54,6 +62,7 @@ export class TerminalFleet {
       const fit = new FitAddon();
       term.loadAddon(fit);
       term.open(host);
+      this.#armStickyCtrl(term);
 
       try {
         const webgl = new WebglAddon();
@@ -74,11 +83,46 @@ export class TerminalFleet {
   focus(face) {
     const entry = this.entries.get(face);
     if (!entry) return;
+    this.focusedFace = face;
+    // Synchronous, inside the tap gesture: iOS only raises the soft keyboard
+    // for a focus() that still carries user activation.
+    entry.term.focus();
     setTimeout(() => {
       entry.fit.fit();
       entry.term.focus();
       this.#sendSize(entry);
     }, 180);
+  }
+
+  blur() {
+    this.entries.get(this.focusedFace)?.term.blur();
+    this.focusedFace = null;
+    this.setCtrlArmed(false);
+  }
+
+  sendKey(name) {
+    const entry = this.entries.get(this.focusedFace);
+    if (!entry) return;
+    const sequence = accessoryKeyInput(name, { applicationCursorKeys: entry.term.modes.applicationCursorKeysMode });
+    if (sequence) entry.term.input(sequence);
+  }
+
+  paste(text) {
+    if (text) this.entries.get(this.focusedFace)?.term.paste(text);
+  }
+
+  setCtrlArmed(armed) {
+    this.ctrlArmed = armed;
+    this.onCtrlChange(armed);
+  }
+
+  retryNow() {
+    for (const entry of this.entries.values()) {
+      if (!entry.ws) {
+        entry.failures = 0;
+        this.#connect(entry);
+      }
+    }
   }
 
   fitAll() {
@@ -104,9 +148,35 @@ export class TerminalFleet {
     }
   }
 
+  // A soft keyboard has no Ctrl, so the accessory row arms it and the next
+  // character is transformed before xterm sees it.
+  #armStickyCtrl(term) {
+    const intercept = (character) => {
+      if (!this.ctrlArmed) return undefined;
+      const code = ctrlCode(character);
+      if (!code) return undefined;
+      term.input(code);
+      this.setCtrlArmed(false);
+      return true;
+    };
+
+    term.textarea?.addEventListener('keydown', (event) => {
+      if (event.key?.length !== 1 || !intercept(event.key)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
+    // Android IMEs report `Unidentified` on keydown; beforeinput carries the character.
+    term.textarea?.addEventListener('beforeinput', (event) => {
+      if (event.inputType !== 'insertText' || !intercept(event.data)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
+  }
+
   #connect(entry) {
-    const ws = new WebSocket(companionWebSocket(`/ws/pty?face=${entry.facet.face}&slot=${this.slot}`));
+    const ws = new WebSocket(hostWebSocket(`/ws/pty?face=${entry.facet.face}&slot=${this.slot}`));
     let attach;
+    let counted = false;
     entry.ws = ws;
 
     ws.addEventListener('open', () => {
@@ -114,10 +184,18 @@ export class TerminalFleet {
       attach = new AttachAddon(ws);
       entry.term.loadAddon(attach);
       this.#sendSize(entry);
+      counted = true;
+      this.openCount += 1;
+      this.onConnection(this.openCount);
     });
 
     ws.addEventListener('close', (event) => {
       attach?.dispose();
+      if (counted) {
+        counted = false;
+        this.openCount = Math.max(0, this.openCount - 1);
+        this.onConnection(this.openCount);
+      }
       if (entry.ws !== ws) return;
       entry.ws = null;
       if (event.code === 1011) {

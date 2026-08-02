@@ -73,10 +73,6 @@ export class SpaceController {
     this.viewport.addEventListener('pointercancel', (event) => this.#pointerUp(event));
     this.viewport.addEventListener('wheel', (event) => this.#wheel(event), { passive: false });
 
-    this.rig.querySelectorAll('.panel').forEach((panel) => {
-      panel.addEventListener('dblclick', () => this.focus(Number(panel.dataset.face)));
-    });
-
     onPageActivity((active) => this.#setWindowActive(active));
     window.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape' || this.focused === null) return;
@@ -237,6 +233,12 @@ export class SpaceController {
       return true;
     }
 
+    // Tapping away is the touch equivalent of Escape, which phones do not have.
+    if (type === 'end' && !moved && this.focused !== null) {
+      this.release();
+      return true;
+    }
+
     const speed = Math.hypot(velocity.x, velocity.y);
     if (!this.zeroGravity || type === 'cancel' || time - lastMoveTime > DRAG_SAMPLE_TIMEOUT_MS || speed <= DRAG_STOP_SPEED) {
       this.velocity = { x: 0, y: 0 };
@@ -255,9 +257,10 @@ export class SpaceController {
   }
 
   #pointerDown(event) {
+    if (event.target.closest?.('a, button, input, select, textarea')) return;
     const terminal = event.target.closest?.('.terminal-surface');
     const panel = event.target.closest?.('.panel');
-    if (terminal && Number(panel?.dataset.face) === this.focused) return;
+    if (terminal && Number(panel?.dataset.face) === this.focused && !document.body.classList.contains('is-unpaired')) return;
     if (!this.dragInput({
       type: 'start',
       id: event.pointerId,
@@ -271,7 +274,10 @@ export class SpaceController {
 
   #pointerMove(event) {
     if (!this.drag) {
-      if (this.zeroGravity && this.focused === null) this.#kick(event.movementX, event.movementY, 0.008);
+      // movementX/Y is only populated for a mouse; touch would feed it undefined.
+      if (this.zeroGravity && this.focused === null && event.pointerType === 'mouse') {
+        this.#kick(event.movementX, event.movementY, 0.008);
+      }
       return;
     }
     this.dragInput({ type: 'move', id: event.pointerId, x: event.clientX, y: event.clientY, time: event.timeStamp });

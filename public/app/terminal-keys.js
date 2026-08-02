@@ -4,6 +4,24 @@ const COMMAND_KEYS = {
   Backspace: '\x15',
 };
 
+const ARROWS = { up: 'A', down: 'B', right: 'C', left: 'D' };
+
+// Keys a soft keyboard cannot produce, for the on-screen accessory row.
+export function accessoryKeyInput(key, { applicationCursorKeys = false } = {}) {
+  if (key === 'escape') return '\x1b';
+  if (key === 'tab') return '\t';
+  const arrow = ARROWS[key];
+  return arrow ? `\x1b${applicationCursorKeys ? 'O' : '['}${arrow}` : undefined;
+}
+
+export function ctrlCode(character) {
+  const value = String(character || '');
+  if (value.length !== 1) return undefined;
+  const code = value.toUpperCase().charCodeAt(0);
+  if (code === 32 || (code >= 64 && code <= 95)) return String.fromCharCode(code & 31);
+  return undefined;
+}
+
 export function commandKeyInput(event) {
   if (!commandOnly(event)) return;
   return COMMAND_KEYS[event.key];

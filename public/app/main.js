@@ -1,8 +1,22 @@
 import { isPageActive, onPageActivity } from './activity.js';
-import { companionHttp, hosted } from './connection.js';
+import { pairingUrl, parseFragment } from './connection-config.js';
+import {
+  activeHost,
+  connectionPlan,
+  hosted,
+  hostHttp,
+  isLoopbackHost,
+  listHosts,
+  markConnected,
+  removeHost,
+  setActiveHost,
+} from './connection.js';
 import { FACETS } from './facets.js';
 import { herdrMetadata } from './herdr.js';
 import { createHandTracking } from './hand-tracking.js';
+import { trackKeyboardInset } from './keyboard-inset.js';
+import { createKeyRow } from './key-row.js';
+import { qrSvg } from './qr.js';
 import { startShader } from './shader.js';
 import { momentumDuration, momentumSliderValue, SpaceController } from './space.js';
 import { TerminalFleet } from './terminals.js';
@@ -22,15 +36,38 @@ const handVideo = document.getElementById('hand-video');
 const handSensitivity = document.getElementById('hand-sensitivity');
 const handSensitivityValue = document.getElementById('hand-sensitivity-value');
 const handCursors = new Map([...document.querySelectorAll('.hand-cursor')].map((cursor) => [cursor.dataset.hand, cursor]));
-const companionGate = document.getElementById('companion-gate');
-const companionStatus = document.getElementById('companion-status');
-const companionLocal = document.getElementById('companion-local');
+const statusBanner = document.getElementById('status-banner');
+const lostBanner = document.getElementById('lost-banner');
+const desktopShells = document.getElementById('desktop-shells');
+const connectStatusLabel = document.getElementById('connect-status-label');
+const connectConnected = document.getElementById('connect-connected');
+const connectHostName = document.getElementById('connect-host-name');
+const connectForm = document.getElementById('connect-form');
+const connectHostInput = document.getElementById('connect-host');
+const connectTokenInput = document.getElementById('connect-token');
+const connectMessage = document.getElementById('connect-message');
+const connectSaved = document.getElementById('connect-saved');
+const hostDirect = document.getElementById('host-direct');
+const hostQr = document.getElementById('host-qr');
 const shader = startShader(document.getElementById('shader-field'));
 let herdrEvents;
 let herdrRefreshing = false;
 let herdrRefreshQueued = false;
+let connectionState = 'connecting';
+let connectAttempt = 0;
 
-const fleet = new TerminalFleet({ slot: 0 });
+const fleet = new TerminalFleet({
+  slot: 0,
+  onConnection(open) {
+    // Backgrounding closes every socket on purpose; that is not a lost host.
+    if (!isPageActive()) return;
+    if (!open && connectionState === 'connected') setConnectionState('lost');
+    if (open && connectionState !== 'connected') setConnectionState('connected');
+  },
+  onCtrlChange(armed) {
+    keyRow.setCtrl(armed);
+  },
+});
 const space = new SpaceController({
   viewport,
   rig,
@@ -38,6 +75,10 @@ const space = new SpaceController({
     fleet.focus(face);
     shader.setFocus(face);
     updatePortState(face);
+    if (connectionState === 'connected' && matchMedia('(pointer: coarse)').matches) {
+      document.body.classList.add('is-terminal-focused');
+      keyRow.show();
+    }
   },
   onMove(rotation) {
     shader.setOrbit(rotation);
@@ -45,6 +86,23 @@ const space = new SpaceController({
   onRelease() {
     shader.setFocus(null);
     updatePortState(null);
+    document.body.classList.remove('is-terminal-focused');
+    keyRow.hide();
+    fleet.blur();
+  },
+});
+const keyRow = createKeyRow({
+  element: document.getElementById('key-row'),
+  onKey: (key) => fleet.sendKey(key),
+  onCtrl: (armed) => fleet.setCtrlArmed(armed),
+  onRelease: () => space.release(),
+  async onPaste() {
+    try {
+      fleet.paste(await navigator.clipboard.readText());
+      keyRow.reportPaste(true);
+    } catch {
+      keyRow.reportPaste(false);
+    }
   },
 });
 const hands = createHandTracking({
@@ -67,11 +125,12 @@ const hands = createHandTracking({
   },
 });
 
-companionLocal.href = companionHttp('/');
 renderFaces();
 renderPorts();
+renderSavedHosts();
+trackKeyboardInset();
 space.bind();
-connectCompanion();
+connectHost();
 momentumInput.value = String(momentumSliderValue(space.settleSeconds));
 gravityInput.checked = space.zeroGravity;
 
@@ -96,25 +155,163 @@ handCamera.addEventListener('change', async () => {
 });
 navigator.mediaDevices?.addEventListener('devicechange', refreshCameras);
 refreshCameras();
-onPageActivity((active) => fleet.setWindowActive(active));
+onPageActivity((active) => {
+  fleet.setWindowActive(active);
+  // Returning to the tab is the natural moment to re-check; no polling needed.
+  // Always re-probe: the host may have gone away while we were backgrounded.
+  if (active) connectHost();
+});
+
+connectForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const host = setActiveHost(connectHostInput.value, { token: connectTokenInput.value.trim() });
+  if (!host) {
+    showMessage('That does not look like an address. Try something like mymac.tailnet.ts.net.');
+    return;
+  }
+  connectTokenInput.value = '';
+  connectHost();
+});
+// A pasted pairing link carries both halves; split it so the user does not have to.
+connectHostInput.addEventListener('input', () => {
+  const { host, token } = parseFragment(connectHostInput.value.split('#')[1] || '');
+  if (!host && !token) return;
+  if (host) connectHostInput.value = host;
+  if (token) connectTokenInput.value = token;
+});
+document.getElementById('connect-paste').addEventListener('click', async () => {
+  try {
+    const text = await navigator.clipboard.readText();
+    const { host, token } = parseFragment(text.split('#')[1] || '');
+    if (!host && !token) {
+      showMessage('That clipboard text has no pairing link in it.');
+      return;
+    }
+    if (host) connectHostInput.value = host;
+    if (token) connectTokenInput.value = token;
+    connectForm.requestSubmit();
+  } catch {
+    showMessage("Couldn't read the clipboard — paste the link into the address field instead.");
+  }
+});
+document.getElementById('retry-now').addEventListener('click', () => {
+  fleet.retryNow();
+  connectHost();
+});
 updateOpacity();
 updateMomentumValue(space.settleSeconds);
 updateHandSensitivity();
 
-async function connectCompanion() {
-  companionStatus.hidden = !hosted;
+async function connectHost() {
+  // A newer attempt supersedes any probe still in flight, so tapping Connect
+  // always takes effect and a slow probe never reports on the wrong computer.
+  const attempt = ++connectAttempt;
+  const wasConnected = connectionState === 'connected';
   try {
-    const response = await fetch(companionHttp('/health'));
-    if (!response.ok) throw new Error();
+    if (isLoopbackHost()) desktopShells.href = hostHttp('/');
+    const plan = connectionPlan();
+    if (plan.type === 'mixed-content') {
+      hostDirect.href = plan.directUrl;
+      hostDirect.hidden = false;
+      setConnectionState('unpaired');
+      showMessage(`${plan.host.name} can only be reached over https from this page. Open it directly instead.`);
+      return;
+    }
+    hostDirect.hidden = true;
+
+    // Re-probing a working host should not flash a failure before it resolves.
+    if (!wasConnected) setConnectionState('connecting');
+    const response = await fetch(hostHttp('/health'), { signal: AbortSignal.timeout(3000) });
+    if (attempt !== connectAttempt) return;
+    if (response.status === 401) {
+      setConnectionState('unpaired');
+      showMessage('That computer needs a pairing code. Copy the one printed by npm start.');
+      return;
+    }
+    if (!response.ok) throw new Error('unreachable');
+
+    markConnected();
+    setConnectionState('connected');
+    showMessage('');
     fleet.start();
     fleet.setWindowActive(isPageActive());
-    herdrEvents = new EventSource(companionHttp('/api/herdr/events'));
+    herdrEvents?.close();
+    herdrEvents = new EventSource(hostHttp('/api/herdr/events'));
     herdrEvents.addEventListener('message', refreshHerdrState);
+    renderSavedHosts();
+    refreshPairingCode();
   } catch {
-    if (!companionGate.open) companionGate.showModal();
-  } finally {
-    companionStatus.hidden = true;
+    if (attempt === connectAttempt) setConnectionState(wasConnected ? 'lost' : 'unpaired');
   }
+}
+
+function setConnectionState(state) {
+  connectionState = state;
+  const host = activeHost();
+  const labels = { connecting: 'Connecting…', unpaired: 'Not connected', connected: host.name, lost: 'Reconnecting…' };
+  document.body.classList.toggle('is-unpaired', state === 'unpaired');
+  document.body.classList.toggle('is-connecting', state === 'connecting');
+  document.body.classList.toggle('is-lost', state === 'lost');
+  document.body.classList.toggle('is-connected', state === 'connected');
+  connectStatusLabel.textContent = labels[state];
+  statusBanner.hidden = state !== 'unpaired';
+  lostBanner.hidden = state !== 'lost';
+  connectConnected.hidden = state !== 'connected';
+  connectHostName.textContent = host.name;
+  if (state !== 'connected') {
+    document.body.classList.remove('is-terminal-focused');
+    keyRow.hide();
+  }
+  rig.querySelectorAll('[data-agent-status]').forEach((status) => {
+    status.textContent = state === 'connected' ? 'unknown' : 'offline';
+  });
+}
+
+function showMessage(text) {
+  connectMessage.textContent = text;
+}
+
+// The QR only exists once the host reports a tailnet address it can be reached on.
+async function refreshPairingCode() {
+  try {
+    const info = await (await fetch(hostHttp('/api/host/info'))).json();
+    if (!info.tsOrigin || !info.token) {
+      hostQr.hidden = true;
+      return;
+    }
+    const link = pairingUrl(info.webOrigin, info.tsOrigin, info.token);
+    document.getElementById('host-qr-image').innerHTML = qrSvg(link);
+    document.getElementById('host-qr-direct').textContent = `${info.tsOrigin}/#token=${info.token}`;
+    hostQr.hidden = false;
+  } catch {
+    hostQr.hidden = true;
+  }
+}
+
+function renderSavedHosts() {
+  const hosts = listHosts().filter((host) => host.origin !== activeHost().origin);
+  connectSaved.replaceChildren(...hosts.map((host) => {
+    const item = document.createElement('li');
+    const use = document.createElement('button');
+    use.type = 'button';
+    use.innerHTML = `<strong>${host.name}</strong><small>${host.origin}</small>`;
+    use.addEventListener('click', () => {
+      setActiveHost(host.origin);
+      location.reload();
+    });
+    const drop = document.createElement('button');
+    drop.type = 'button';
+    drop.className = 'connect-remove';
+    drop.setAttribute('aria-label', `Forget ${host.name}`);
+    drop.textContent = '✕';
+    drop.addEventListener('click', () => {
+      removeHost(host.origin);
+      renderSavedHosts();
+    });
+    item.append(use, drop);
+    return item;
+  }));
+  connectSaved.hidden = !hosts.length;
 }
 
 function renderFaces() {
@@ -139,7 +336,10 @@ function renderPorts() {
     button.setAttribute('aria-label', `Focus ${facet.name} terminal`);
     button.setAttribute('aria-pressed', 'false');
     button.innerHTML = `<span><strong>${facet.name}</strong><small data-session-label>${facet.code}</small></span>`;
-    button.addEventListener('click', () => space.focus(facet.face));
+    button.addEventListener('click', () => {
+      if (space.focused === facet.face) space.release();
+      else space.focus(facet.face);
+    });
     portList.append(button);
   }
 }
@@ -168,7 +368,7 @@ async function refreshHerdrState() {
   do {
     herdrRefreshQueued = false;
     try {
-      const response = await fetch(companionHttp('/api/herdr/state'));
+      const response = await fetch(hostHttp('/api/herdr/state'));
       if (!response.ok) continue;
 
       for (const { face, snapshot } of await response.json()) {

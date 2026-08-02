@@ -1,28 +1,142 @@
-import { DEFAULT_COMPANION_HOST, DEFAULT_COMPANION_PORT, isLoopbackHostname } from './connection-config.js';
+import {
+  DEFAULT_HOST_ORIGIN,
+  DEFAULT_WEB_ORIGIN,
+  isLoopbackHostname,
+  mixedContentBlocked,
+  normalizeHostOrigin,
+  parseFragment,
+} from './connection-config.js';
 
-export const hosted = !isLoopbackHostname(location.hostname);
-const origin = hosted ? `http://${DEFAULT_COMPANION_HOST}:${DEFAULT_COMPANION_PORT}` : location.origin;
-const fragment = new URLSearchParams(location.hash.slice(1));
-let token = fragment.get('token') || '';
+const STORE_KEY = 'cmux3d.hosts.v1';
+const LEGACY_TOKEN_KEY = 'cmux3d-token';
 
-if (hosted) {
-  if (token) sessionStorage.setItem('cmux3d-token', token);
-  else token = sessionStorage.getItem('cmux3d-token') || '';
-  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+export const hosted = location.origin === DEFAULT_WEB_ORIGIN;
+
+const store = readStore();
+adoptFragment();
+
+export function activeHost() {
+  const origin = store.activeOrigin || defaultOrigin();
+  return store.hosts[origin] || { origin, name: hostName(origin), token: '', lastConnected: 0 };
 }
 
-export function companionHttp(path) {
-  return companionUrl(path).href;
+export function listHosts() {
+  return Object.values(store.hosts).sort((a, b) => (b.lastConnected || 0) - (a.lastConnected || 0));
 }
 
-export function companionWebSocket(path) {
-  const url = companionUrl(path);
+export function setActiveHost(input, { token, name } = {}) {
+  const origin = normalizeHostOrigin(input);
+  if (!origin) return null;
+  const existing = store.hosts[origin];
+  store.hosts[origin] = {
+    origin,
+    name: name || existing?.name || hostName(origin),
+    token: token ?? existing?.token ?? '',
+    addedAt: existing?.addedAt || Date.now(),
+    lastConnected: existing?.lastConnected || 0,
+  };
+  store.activeOrigin = origin;
+  writeStore();
+  return store.hosts[origin];
+}
+
+export function removeHost(origin) {
+  delete store.hosts[origin];
+  if (store.activeOrigin === origin) store.activeOrigin = listHosts()[0]?.origin || defaultOrigin();
+  writeStore();
+}
+
+export function markConnected() {
+  const host = setActiveHost(activeHost().origin);
+  if (!host) return;
+  host.lastConnected = Date.now();
+  writeStore();
+}
+
+export function isLoopbackHost(origin = activeHost().origin) {
+  try {
+    return isLoopbackHostname(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
+// An https page can only reach loopback over http. Anything else has to be opened
+// on the host's own origin, where the page and the shells are same-origin.
+export function connectionPlan() {
+  const host = activeHost();
+  if (!mixedContentBlocked(location.protocol, host.origin)) return { type: 'ok', host };
+  const direct = new URL(host.origin);
+  direct.hash = host.token ? `token=${encodeURIComponent(host.token)}` : '';
+  return { type: 'mixed-content', host, directUrl: direct.href };
+}
+
+export function hostHttp(path) {
+  return hostUrl(path).href;
+}
+
+export function hostWebSocket(path) {
+  const url = hostUrl(path);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return url.href;
 }
 
-function companionUrl(path) {
-  const url = new URL(path, origin);
-  if (hosted && token) url.searchParams.set('token', token);
+function hostUrl(path) {
+  const host = activeHost();
+  const url = new URL(path, host.origin);
+  if (host.token) url.searchParams.set('token', host.token);
   return url;
+}
+
+function defaultOrigin() {
+  return hosted ? DEFAULT_HOST_ORIGIN : location.origin;
+}
+
+function hostName(origin) {
+  if (isLoopbackHost(origin)) return 'This computer';
+  try {
+    return new URL(origin).hostname.split('.')[0];
+  } catch {
+    return origin;
+  }
+}
+
+// `#host=…&token=…` fully configures a phone from one scanned or pasted link.
+function adoptFragment() {
+  const { host, token } = parseFragment(location.hash);
+  if (host || token) {
+    setActiveHost(host || activeHost().origin || defaultOrigin(), { token: token || undefined });
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  migrateLegacyToken();
+}
+
+function migrateLegacyToken() {
+  let legacy = '';
+  try {
+    legacy = sessionStorage.getItem(LEGACY_TOKEN_KEY) || '';
+    if (legacy) sessionStorage.removeItem(LEGACY_TOKEN_KEY);
+  } catch {
+    return;
+  }
+  if (legacy && !store.hosts[DEFAULT_HOST_ORIGIN]?.token) setActiveHost(DEFAULT_HOST_ORIGIN, { token: legacy });
+}
+
+function readStore() {
+  const empty = { version: 1, activeOrigin: '', hosts: {} };
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORE_KEY) || '');
+    if (parsed?.version !== 1 || !parsed.hosts) return empty;
+    return { ...empty, ...parsed };
+  } catch {
+    return empty;
+  }
+}
+
+function writeStore() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(store));
+  } catch {
+    // Private browsing; the session still works, it just will not be remembered.
+  }
 }

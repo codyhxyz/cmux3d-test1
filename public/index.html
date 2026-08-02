@@ -2,25 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0b0e12" />
     <meta name="description" content="Six local shells in one spatial workspace." />
     <title>CMUX3D — Six shells, one workspace</title>
     <link rel="stylesheet" href="/vendor/xterm.css" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
   </head>
   <body>
     <canvas class="shader-field" id="shader-field" aria-hidden="true"></canvas>
-    <output class="connection-status" id="companion-status" aria-live="polite" hidden>Connecting…</output>
-    <dialog class="companion-gate" id="companion-gate" aria-labelledby="companion-gate-title" aria-describedby="companion-gate-description">
-      <div class="companion-gate__content">
-        <span class="connection-mark" aria-hidden="true"></span>
-        <h1 id="companion-gate-title">Open CMUX3D locally</h1>
-        <p id="companion-gate-description">The hosted page couldn’t reach the local companion.</p>
-        <a class="companion-primary" id="companion-local">Open local workspace</a>
-        <a class="companion-help" href="https://github.com/codyhxyz/cmux3d-test1">Need to install CMUX3D? Setup</a>
-      </div>
-    </dialog>
     <span class="hand-cursor" data-hand="hand-left" aria-hidden="true" hidden></span>
     <span class="hand-cursor" data-hand="hand-right" aria-hidden="true" hidden></span>
 
@@ -29,6 +22,65 @@
         <strong>CMUX<span>3D</span></strong>
         <small>Coding Cube</small>
       </a>
+      <button class="connect-chip" id="connect-status" type="button" popovertarget="connect-panel">
+        <i></i><span id="connect-status-label">Connecting…</span>
+      </button>
+      <section class="connect-panel" id="connect-panel" popover aria-label="Connect to your computer">
+        <header>
+          <strong>Connect to your computer</strong>
+          <button type="button" popovertarget="connect-panel" popovertargetaction="hide" aria-label="Close">Done</button>
+        </header>
+
+        <p class="connect-connected" id="connect-connected" hidden>
+          Connected to <b id="connect-host-name">this computer</b>. Six shells attached.
+        </p>
+
+        <p class="connect-lede">Six real shells run on a computer you own. Pair this page with it — nothing runs in the cloud.</p>
+
+        <div class="connect-local">
+          <strong>On this computer</strong>
+          <ol>
+            <li>Get CMUX3D and run <code>npm install</code>.</li>
+            <li>Run <code>npm start</code> — this page connects by itself.</li>
+          </ol>
+          <a id="desktop-shells" href="http://127.0.0.1:8064/">Open the local workspace</a>
+        </div>
+
+        <form class="connect-remote" id="connect-form">
+          <strong>Another computer</strong>
+          <label for="connect-host">Computer address
+            <input id="connect-host" name="host" placeholder="mymac.tailnet.ts.net" inputmode="url"
+              autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false" />
+          </label>
+          <label for="connect-token">Pairing code
+            <input id="connect-token" name="token" placeholder="printed by npm start"
+              autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false" />
+          </label>
+          <div class="connect-actions">
+            <button type="submit">Connect</button>
+            <button type="button" id="connect-paste">Paste pairing link</button>
+          </div>
+          <output id="connect-message" aria-live="polite"></output>
+          <a id="host-direct" href="#" hidden>Open directly on that computer's address</a>
+        </form>
+
+        <ul class="connect-saved" id="connect-saved" hidden></ul>
+
+        <figure class="connect-qr" id="host-qr" hidden>
+          <figcaption>Scan with your phone to pair</figcaption>
+          <div id="host-qr-image"></div>
+          <code id="host-qr-direct"></code>
+        </figure>
+
+        <details class="connect-tailscale">
+          <summary>Reach your computer from anywhere with Tailscale</summary>
+          <ol>
+            <li>Install Tailscale on both devices, signed in to the same account.</li>
+            <li>On your computer, run <code>npm start -- --expose</code>. It prints a pairing link and the computer's Tailscale address.</li>
+            <li>Open that link here or scan its QR code — or type the address, like <code>mymac.tailnet.ts.net</code>, with the pairing code above.</li>
+          </ol>
+        </details>
+      </section>
       <button class="settings-button" type="button" popovertarget="settings-panel">Settings</button>
       <section class="settings-panel" id="settings-panel" popover aria-label="Workspace settings">
         <header>
@@ -74,7 +126,19 @@
     </aside>
 
     <main class="viewport" id="viewport" aria-label="Rotatable terminal cube">
-      <p class="sr-only" id="cube-instructions">Drag to rotate, use the mouse wheel to zoom, and select a face to type in its shell. Press Escape to release it.</p>
+      <p class="status-banner" id="status-banner" aria-live="polite" hidden>
+        <strong>No computer connected.</strong>
+        <span class="on-fine">Run <code>npm start</code> on this machine, or pair another computer.</span>
+        <span class="on-coarse">Pair your computer to put six real shells on this cube.</span>
+        <button type="button" popovertarget="connect-panel">Connect</button>
+      </p>
+      <p class="status-banner status-banner--lost" id="lost-banner" aria-live="assertive" hidden>
+        <strong>Connection lost.</strong>
+        <span>Retrying…</span>
+        <button type="button" id="retry-now">Retry now</button>
+        <button type="button" popovertarget="connect-panel">Change computer</button>
+      </p>
+      <p class="sr-only" id="cube-instructions">Drag to rotate, pinch or use the mouse wheel to zoom, and select a face to focus it. Tap away from the cube, or press Escape, to release it.</p>
       <section class="rig" id="rig" aria-describedby="cube-instructions">
         <article class="panel panel--front" data-face="0">
           <header></header>
@@ -102,6 +166,18 @@
         </article>
       </section>
     </main>
+
+    <nav class="key-row" id="key-row" aria-label="Terminal keys" hidden>
+      <button type="button" data-key="escape">esc</button>
+      <button type="button" data-key="tab">tab</button>
+      <button type="button" data-key="ctrl" aria-pressed="false">ctrl</button>
+      <button type="button" data-key="up" aria-label="Arrow up">↑</button>
+      <button type="button" data-key="down" aria-label="Arrow down">↓</button>
+      <button type="button" data-key="left" aria-label="Arrow left">←</button>
+      <button type="button" data-key="right" aria-label="Arrow right">→</button>
+      <button type="button" data-key="paste">paste</button>
+      <button type="button" data-key="release" aria-label="Release terminal">✕</button>
+    </nav>
 
     <footer class="controls" aria-hidden="true">
       <span>Drag <b>orbit</b></span>

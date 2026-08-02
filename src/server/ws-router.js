@@ -1,17 +1,23 @@
 import { WebSocketServer } from 'ws';
-import { browserOriginAllowed, hostedRequestAuthorized } from './origin.js';
+import { browserOriginAllowed, requestAuthorized, requestIsRemote } from './origin.js';
 
-export function mountTerminalSocket(httpServer, terminalGrid, webOrigin, token) {
+export function mountTerminalSocket(httpServer, terminalGrid, webOrigin, token, exposure) {
   const wss = new WebSocketServer({ noServer: true });
 
   httpServer.on('upgrade', (req, socket, head) => {
     const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-    if (!browserOriginAllowed(req.headers.origin, webOrigin)) {
+    const allowed = browserOriginAllowed(req.headers.origin, {
+      webOrigin,
+      exposure,
+      requestHost: req.headers.host,
+      remote: requestIsRemote(req),
+    });
+    if (!allowed) {
       socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
       socket.destroy();
       return;
     }
-    if (!hostedRequestAuthorized(req, requestUrl, webOrigin, token)) {
+    if (!requestAuthorized(req, requestUrl, { webOrigin, token, exposure })) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
       return;

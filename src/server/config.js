@@ -1,8 +1,8 @@
-import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_COMPANION_HOST, DEFAULT_COMPANION_PORT, DEFAULT_WEB_ORIGIN } from '../../public/app/connection-config.js';
+import { DEFAULT_HOST_ADDRESS, DEFAULT_HOST_PORT, DEFAULT_WEB_ORIGIN } from '../../public/app/connection-config.js';
 import { DEFAULT_WORKSPACE } from './herdr-state.js';
+import { loadOrCreateToken, rotateToken } from './token-store.js';
 
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(serverDir, '..', '..');
@@ -12,15 +12,19 @@ export const paths = Object.freeze({
   public: path.join(projectRoot, 'public'),
 });
 
-export function readServerOptions(env = process.env) {
+export function readServerOptions(env = process.env, argv = process.argv) {
+  const rotate = env.CMUX3D_ROTATE_TOKEN === '1' || argv.includes('--rotate-token');
   return {
-    host: env.HOST || DEFAULT_COMPANION_HOST,
-    port: Number(env.PORT || DEFAULT_COMPANION_PORT),
+    host: env.HOST || DEFAULT_HOST_ADDRESS,
+    port: Number(env.PORT || DEFAULT_HOST_PORT),
     cwd: env.CMUX3D_WORKDIR || process.cwd(),
     shell: env.CMUX3D_SHELL || env.SHELL,
-    herdr: env.CMUX3D_HERDR === '0' ? null : env.CMUX3D_HERDR || 'herdr',
+    herdr: !env.CMUX3D_HERDR || env.CMUX3D_HERDR === '0' ? null : env.CMUX3D_HERDR,
     workspace: env.CMUX3D_WORKSPACE || DEFAULT_WORKSPACE,
     webOrigin: env.CMUX3D_WEB_ORIGIN || DEFAULT_WEB_ORIGIN,
-    token: env.CMUX3D_TOKEN || randomBytes(24).toString('base64url'),
+    // The env override is honoured but never written to disk.
+    token: env.CMUX3D_TOKEN || (rotate ? rotateToken(env) : loadOrCreateToken(env)),
+    rotated: rotate && !env.CMUX3D_TOKEN,
+    expose: env.CMUX3D_TAILSCALE === '1' || argv.includes('--expose'),
   };
 }

@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import WebSocket from 'ws';
 import { HandController, handSample } from '../public/app/hand-tracking.js';
 import { herdrMetadata } from '../public/app/herdr.js';
-import { commandKeyInput, commandPromptDirection, promptLine } from '../public/app/terminal-keys.js';
+import { accessoryKeyInput, commandKeyInput, commandPromptDirection, ctrlCode, promptLine } from '../public/app/terminal-keys.js';
+import { mixedContentBlocked, normalizeHostOrigin, pairingUrl, parseFragment } from '../public/app/connection-config.js';
+import { encodeQr } from '../public/app/qr.js';
 import {
   DAMPING,
   DRAG_DAMPING,
@@ -22,9 +24,12 @@ import {
   SpaceController,
   STOP_SPEED,
 } from '../public/app/space.js';
+import { readServerOptions } from '../src/server/config.js';
 import { selectCubeFaces } from '../src/server/herdr-state.js';
 import { browserOriginAllowed } from '../src/server/origin.js';
 import { createRuntime } from '../src/server/runtime.js';
+import { parseServeStatus, parseStatus, supportsServeBackground } from '../src/server/tailscale.js';
+import { loadOrCreateToken, rotateToken } from '../src/server/token-store.js';
 
 await checkHerdrStateEndpoint();
 
@@ -38,8 +43,99 @@ assert.equal(promptLine([3, 11, 27], 20, 1), 27, 'next prompt navigation should 
 assert.equal(commandKeyInput({ key: 'a', metaKey: true }), undefined, 'xterm should retain its working command-A behavior');
 assert.equal(commandKeyInput({ key: 'ArrowLeft', altKey: true }), undefined, 'xterm should retain its working option-arrow behavior');
 
-assert.equal(browserOriginAllowed('https://cube.example', 'https://cube.example'), true, 'the configured hosted UI should reach the companion');
+assert.equal(accessoryKeyInput('escape'), '\x1b', 'the key row should send escape where phones have no key for it');
+assert.equal(accessoryKeyInput('tab'), '\t', 'the key row should send tab');
+assert.equal(accessoryKeyInput('up'), '\x1b[A', 'arrows should use normal cursor keys by default');
+assert.equal(accessoryKeyInput('up', { applicationCursorKeys: true }), '\x1bOA', 'arrows should follow the application cursor mode');
+assert.equal(ctrlCode('c'), '\x03', 'sticky ctrl should interrupt');
+assert.equal(ctrlCode('C'), '\x03', 'sticky ctrl should ignore the shift state of a soft keyboard');
+assert.equal(ctrlCode('1'), undefined, 'sticky ctrl should pass through characters with no control code');
+
+assert.equal(browserOriginAllowed('https://cube.example', 'https://cube.example'), true, 'the configured hosted UI should reach the host');
 assert.equal(browserOriginAllowed('https://evil.example', 'https://cube.example'), false, 'other hosted origins must not reach local shells');
+assert.equal(
+  browserOriginAllowed('https://mymac.tail47c266.ts.net', { webOrigin: 'https://cube.example', exposure: { tsOrigin: 'https://mymac.tail47c266.ts.net' } }),
+  true,
+  'an exposed tailnet address should reach its own host',
+);
+assert.equal(
+  browserOriginAllowed('https://mymac.tail47c266.ts.net', { webOrigin: 'https://cube.example', exposure: { tsOrigin: null } }),
+  false,
+  'a tailnet origin should not be trusted before exposure is detected',
+);
+assert.equal(
+  browserOriginAllowed('http://mymac.local:8064', { webOrigin: 'https://cube.example', requestHost: 'mymac.local:8064', remote: true }),
+  true,
+  'a phone browsing the host directly should be same-origin',
+);
+assert.equal(
+  browserOriginAllowed('http://evil.example', { webOrigin: 'https://cube.example', requestHost: 'evil.example', remote: false }),
+  false,
+  'a site that rebinds its DNS to loopback must not be trusted by its own Host header',
+);
+
+const tokenDir = await mkdtemp(path.join(os.tmpdir(), 'cmux3d-token-'));
+const tokenEnv = { CMUX3D_STATE_DIR: tokenDir };
+assert.equal(readServerOptions(tokenEnv, []).herdr, null, 'a clean install should start ordinary shells without Herdr setup');
+assert.equal(readServerOptions({ ...tokenEnv, CMUX3D_HERDR: 'herdr' }, []).herdr, 'herdr', 'Herdr attachment should remain an explicit option');
+assert.equal(readServerOptions(tokenEnv, []).expose, false, 'exposing the cube to a tailnet should stay opt-in');
+assert.equal(readServerOptions(tokenEnv, ['--expose']).expose, true, '--expose should opt in to tailnet exposure');
+const firstToken = loadOrCreateToken(tokenEnv);
+assert.equal(loadOrCreateToken(tokenEnv), firstToken, 'pairing should survive a restart so phones stay paired');
+assert.equal((await stat(path.join(tokenDir, 'token'))).mode & 0o777, 0o600, 'the pairing code should not be world readable');
+assert.notEqual(rotateToken(tokenEnv), firstToken, 'rotating should invalidate the old pairing code');
+assert.equal(readServerOptions({ ...tokenEnv, CMUX3D_TOKEN: 'from-env' }, []).token, 'from-env', 'an explicit token should win over the stored one');
+await rm(tokenDir, { recursive: true, force: true });
+
+assert.equal(normalizeHostOrigin('mymac.tailnet.ts.net'), 'https://mymac.tailnet.ts.net', 'a bare address needs TLS to be reachable from the hosted page');
+assert.equal(normalizeHostOrigin('127.0.0.1:8064'), 'http://127.0.0.1:8064', 'loopback stays plain http');
+assert.equal(normalizeHostOrigin('https://mymac.ts.net/'), 'https://mymac.ts.net', 'a pasted URL should reduce to its origin');
+assert.equal(normalizeHostOrigin('not a host'), null, 'unparseable input should be rejected rather than guessed at');
+assert.deepEqual(parseFragment('#token=abc'), { host: null, token: 'abc' }, 'the original pairing link should keep working');
+assert.deepEqual(
+  parseFragment(`#host=${encodeURIComponent('https://mymac.ts.net')}&token=abc`),
+  { host: 'https://mymac.ts.net', token: 'abc' },
+  'one link should carry both the address and the pairing code',
+);
+assert.equal(mixedContentBlocked('https:', 'http://mymac.ts.net:8064'), true, 'an https page cannot reach a plain remote host');
+assert.equal(mixedContentBlocked('https:', 'http://127.0.0.1:8064'), false, 'browsers exempt loopback from mixed content');
+assert.equal(mixedContentBlocked('http:', 'http://mymac.ts.net:8064'), false, 'a plain page can reach a plain host');
+assert.match(pairingUrl('https://cube.example', 'https://mymac.ts.net', 'abc'), /#host=https%3A%2F%2Fmymac\.ts\.net&token=abc$/, 'the printed pairing link should configure a phone in one step');
+
+assert.deepEqual(
+  parseStatus({
+    BackendState: 'Running',
+    Self: { DNSName: 'mymac.tail47c266.ts.net.', TailscaleIPs: ['100.117.81.83', 'fd7a:115c:a1e0::f801:51aa'] },
+    CertDomains: null,
+    CurrentTailnet: { MagicDNSEnabled: true },
+  }),
+  { running: true, dnsName: 'mymac.tail47c266.ts.net', ip: '100.117.81.83', certDomains: [], magicDns: true },
+  'the trailing dot in a MagicDNS name should not reach the browser',
+);
+// Binding to the tailnet address is the no-certificate path to shells on a phone.
+assert.equal(
+  parseStatus({ BackendState: 'Running', Self: { DNSName: 'm.ts.net.', TailscaleIPs: ['fd7a:115c::1', '100.64.0.2'] } }).ip,
+  '100.64.0.2',
+  'the IPv4 tailnet address is the one to bind',
+);
+assert.deepEqual(parseServeStatus({}, 8064), { tsOrigin: null, funnel: false }, 'an idle tailscale serve reports nothing to expose');
+assert.deepEqual(
+  parseServeStatus({
+    Web: { 'mymac.tail47c266.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:8064' } } } },
+    AllowFunnel: { 'mymac.tail47c266.ts.net:443': true },
+  }, 8064),
+  { tsOrigin: 'https://mymac.tail47c266.ts.net', funnel: true },
+  'an active serve rule should be recognised, funnel included',
+);
+assert.deepEqual(parseServeStatus({ Web: { 'mymac.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:9999' } } } } }, 8064).tsOrigin, null, 'a serve rule for another port is not our exposure');
+assert.equal(supportsServeBackground([1, 56]), true, 'tailscale 1.56 introduced the background serve flag');
+assert.equal(supportsServeBackground([1, 40]), false, 'older tailscale needs the manual serve command');
+
+const pairingQr = encodeQr(pairingUrl('https://codingcube.codyh.xyz', 'https://mymac.tail47c266.ts.net', 'K'.repeat(32)));
+assert.equal((pairingQr.size - 17) % 4, 0, 'a QR symbol should have a valid version size');
+assert.equal(pairingQr.modules[0].slice(0, 7).join(''), '1111111', 'the finder pattern should anchor the symbol');
+// Versions 7 and up need the version block, which a real pairing link reaches.
+assert.ok(pairingQr.size >= 45, 'a full pairing link should need a version 7 or larger symbol');
 
 assert.deepEqual(
   herdrMetadata({
@@ -131,7 +227,7 @@ try {
   const httpBase = `http://${host}:${port}`;
   const wsBase = `ws://${host}:${port}`;
 
-  assert.equal((await fetch(`${httpBase}/health`, { headers: { origin: webOrigin } })).status, 401, 'the hosted UI must pair before reaching the companion');
+  assert.equal((await fetch(`${httpBase}/health`, { headers: { origin: webOrigin } })).status, 401, 'the hosted UI must pair before reaching the host');
   const allowedOrigin = await fetch(`${httpBase}/health?token=${token}`, { headers: { origin: webOrigin } });
   assert.equal(allowedOrigin.status, 200);
   assert.equal(allowedOrigin.headers.get('access-control-allow-origin'), webOrigin, 'the paired hosted UI should receive CORS access');
@@ -140,6 +236,39 @@ try {
   assert.equal(preflight.status, 204, 'private-network preflights should succeed for the configured UI');
   assert.equal(preflight.headers.get('access-control-allow-private-network'), 'true');
 
+  // Anything arriving over a tailnet is remote even though the proxy dials from loopback.
+  const forwarded = { 'x-forwarded-for': '100.64.0.5' };
+  assert.equal((await fetch(`${httpBase}/health`, { headers: forwarded })).status, 401, 'a forwarded request must pair even without an Origin header');
+  assert.equal((await fetch(`${httpBase}/api/herdr/state`, { headers: forwarded })).status, 401, 'forwarded API access must pair');
+  assert.equal((await fetch(`${httpBase}/health?token=${token}`, { headers: forwarded })).status, 200, 'a paired phone should reach the host over the tailnet');
+  assert.equal((await fetch(`${httpBase}/`, { headers: forwarded })).status, 200, 'the app shell must load before a phone can present its pairing code');
+  assert.equal((await fetch(`${httpBase}/health`)).status, 200, 'local tools share the trust domain of the shells they open');
+
+  const hostInfo = await fetch(`${httpBase}/api/host/info?token=${token}`, { headers: forwarded });
+  assert.equal(hostInfo.status, 200);
+  assert.equal(hostInfo.headers.get('cache-control'), 'no-store', 'pairing details must never be cached');
+  assert.equal((await hostInfo.json()).exposed, false, 'a loopback-only host should not advertise a tailnet address');
+
+  // A page on any other origin — including another localhost port — must not be
+  // able to read the pairing code, which is the one credential for remote access.
+  const leaked = await (await fetch(`${httpBase}/api/host/info`, { headers: { origin: 'http://localhost:3000' } })).json();
+  assert.equal(leaked.token, null, 'a cross-origin page must not be handed the pairing code');
+
+  // DNS rebinding: a remote site resolving to loopback controls only its own
+  // Origin and Host headers, and neither may grant it access.
+  const rebound = await rawRequest(host, port, { Host: 'evil.example', Origin: 'http://evil.example' }, '/api/host/info');
+  assert.match(rebound, /^HTTP\/1\.1 403/, 'a rebound origin must not reach the host by claiming its own Host header');
+  assert.doesNotMatch(rebound, new RegExp(token), 'a rebound origin must never see the pairing code');
+  const reboundSocket = await rawRequest(host, port, {
+    Host: 'evil.example',
+    Origin: 'http://evil.example',
+    Upgrade: 'websocket',
+    Connection: 'Upgrade',
+    'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+    'Sec-WebSocket-Version': '13',
+  }, '/ws/pty?face=0&slot=0');
+  assert.doesNotMatch(reboundSocket, /101 Switching Protocols/, 'a rebound origin must never open a terminal');
+
   const home = await fetch(`${httpBase}/`);
   assert.equal(home.status, 200, 'index should be served');
   const homeSource = await home.text();
@@ -147,12 +276,34 @@ try {
   assert.match(homeSource, /momentum-duration/, 'settings should expose the momentum slider');
   assert.match(homeSource, /zero-gravity/, 'settings should expose the zero-gravity toggle');
   assert.match(homeSource, /hand-control/, 'settings should expose the opt-in hand control');
-  assert.match(homeSource, /Open CMUX3D locally/, 'failed hosted pairing should offer the local workspace');
-  assert.match(homeSource, /id="companion-status"[^>]*hidden/, 'automatic pairing should use a transient connection status');
+  assert.match(homeSource, /No computer connected/, 'an unpaired cube should say what is missing');
+  assert.match(homeSource, /id="connect-panel" popover/, 'the connect flow should be light-dismiss, never a blocking gate');
+  assert.match(homeSource, /id="connect-host"[^>]*placeholder="mymac\.tailnet\.ts\.net"/, 'the connect form should ask for a computer address');
+  assert.match(homeSource, /id="connect-token"/, 'the connect form should ask for a pairing code');
+  assert.match(homeSource, /id="key-row"/, 'phones need keys a soft keyboard cannot produce');
+  assert.match(homeSource, /data-key="ctrl"[^>]*aria-pressed/, 'the sticky ctrl key should report its armed state');
+  assert.match(homeSource, /rel="manifest" href="\/manifest\.webmanifest"/, 'the cube should be installable on a phone');
+  assert.match(homeSource, /id="desktop-shells" href="http:\/\/127\.0\.0\.1:8064\/"/, 'the desktop-shells action should open the local workspace');
+  assert.match(homeSource, /viewport-fit=cover/, 'mobile layout should respect device safe areas');
+  assert.doesNotMatch(homeSource, /<dialog|companion-gate/, 'a missing host must not block the cube with a menu');
   assert.doesNotMatch(homeSource, /HerdR, Pi, terminals/, 'the connection UI should not explain internal architecture');
+  assert.doesNotMatch(homeSource, /companion|Interactive preview/i, 'the product should speak of a computer you own, not a companion');
   assert.equal(homeSource.match(/class="hand-cursor"/g)?.length, 2, 'the UI should expose one marker per tracked hand');
+
+  const manifest = await fetch(`${httpBase}/manifest.webmanifest`);
+  assert.equal(manifest.status, 200, 'the manifest should be served');
+  assert.match(manifest.headers.get('content-type'), /application\/manifest\+json/, 'the manifest needs its own media type to install');
+  assert.equal((await manifest.json()).display, 'standalone', 'an installed cube should not render browser chrome');
+  const icon = await fetch(`${httpBase}/icons/icon-192.png`);
+  assert.equal(icon.headers.get('content-type'), 'image/png', 'icons must not be served as a download');
+
   const styles = await (await fetch(`${httpBase}/styles.css`)).text();
+  assert.match(styles, /\(max-height: 520px\) and \(pointer: coarse\)/, 'short landscape phones should use the mobile controls');
   assert.match(styles, /\.hand-cursor\[data-state="ineligible"\]::after[^}]*content:\s*"Open fingers"/s, 'a rejected pinch should explain how to become eligible');
+  assert.match(styles, /@media \(hover: hover\)/, 'hover states must not stick after a tap');
+  assert.match(styles, /\.panel\.is-focused \.terminal-surface[^{]*\{[^}]*touch-action: pan-y/s, 'scrollback should pan under a finger on the focused face');
+  assert.match(styles, /body\.is-keyboard\s*\{[^}]*--cube:/s, 'the cube should shrink to fit above the soft keyboard');
+  assert.doesNotMatch(styles, /max-height: calc\(100vh/, 'panel heights should follow the dynamic viewport on phones');
 
   const script = await fetch(`${httpBase}/app/terminals.js`);
   assert.equal(script.status, 200, 'terminal client should be served');
@@ -162,14 +313,25 @@ try {
   assert.match(terminalSource, /attachCustomKeyEventHandler/, 'terminal should install the command-key bindings');
   assert.match(terminalSource, /Math\.min\(1000 \* 2 \*\* entry\.failures\+\+, 60_000\)/, 'terminal retries should back off to a one-minute ceiling');
   assert.match(terminalSource, /entry\.ws = null;\s*ws\.close\(\)/, 'an inactive browser should release terminal sizing back to Ghostty');
+  assert.match(
+    terminalSource,
+    /focus\(face\) \{[^}]*entry\.term\.focus\(\);/s,
+    'focus must run inside the tap gesture or iOS will not raise the keyboard',
+  );
+  assert.match(terminalSource, /beforeinput/, 'sticky ctrl must also work with Android input methods');
 
   const main = await fetch(`${httpBase}/app/main.js`);
   assert.equal(main.status, 200, 'main client should be served');
   const mainSource = await main.text();
-  assert.match(mainSource, /new EventSource\(companionHttp\('\/api\/herdr\/events'\)\)/, 'the UI should subscribe to HerdR events');
-  assert.match(mainSource, /space\.bind\(\);\s*connectCompanion\(\);/, 'the paired launch should connect without another click');
-  assert.match(mainSource, /if \(!companionGate\.open\) companionGate\.showModal\(\)/, 'the recovery screen should appear only after connection failure');
-  assert.doesNotMatch(mainSource, /companionConnect/, 'the removed connection gate should leave no dead button code');
+  assert.match(mainSource, /new EventSource\(hostHttp\('\/api\/herdr\/events'\)\)/, 'the UI should subscribe to HerdR events');
+  assert.match(mainSource, /space\.bind\(\);\s*connectHost\(\);/, 'every device should try to reach a host');
+  assert.doesNotMatch(mainSource, /pointer: fine/, 'phones must not be excluded from pairing');
+  assert.match(mainSource, /AbortSignal\.timeout\(3000\)/, 'an unreachable host should stop background pairing quickly');
+  assert.match(mainSource, /function setConnectionState\(/, 'the UI should track one connection state rather than a preview flag');
+  assert.match(mainSource, /desktopShells\.href = hostHttp\('\/'\)/, 'desktop shells should use the shared host URL');
+  assert.match(mainSource, /if \(active\) connectHost\(\)/, 'returning to the tab should re-check the host');
+  assert.match(mainSource, /if \(!isPageActive\(\)\) return;/, 'sockets closed by backgrounding must not read as a lost host');
+  assert.doesNotMatch(mainSource, /companion|showModal/i, 'connection failure should never open a blocking gate');
   assert.doesNotMatch(mainSource, /setInterval/, 'HerdR state should not be polled');
 
   const shader = await fetch(`${httpBase}/app/shader.js`);
@@ -410,6 +572,11 @@ function checkTwoInputSpace() {
       return null;
     },
   };
+  const linkTarget = {
+    closest(selector) {
+      return selector === 'a, button, input, select, textarea' ? {} : null;
+    },
+  };
   let pointerCaptures = 0;
   let releases = 0;
   globalThis.document = {
@@ -464,6 +631,15 @@ function checkTwoInputSpace() {
     assert.equal(space.drag, null, 'focused terminal state should own pointer input even when its DOM class is stale');
     assert.equal(pointerCaptures, 0, 'terminal pointer input should not be captured by the cube');
 
+    listeners.get('pointerdown')({ target: linkTarget, pointerId: 2, clientX: 20, clientY: 20, timeStamp: 64 });
+    assert.equal(pointerCaptures, 0, 'links inside the viewport should retain native click behavior');
+
+    classes.add('is-unpaired');
+    listeners.get('pointerdown')({ target, pointerId: 2, clientX: 20, clientY: 20, timeStamp: 65 });
+    assert.equal(pointerCaptures, 1, 'unpaired faces should remain draggable after they are focused');
+    listeners.get('pointerup')({ type: 'pointerup', pointerId: 2, timeStamp: 66 });
+    classes.remove('is-unpaired');
+
     space.dragInput({ type: 'start', id: 'hand-left', x: 0, y: 0, time: 70 });
     space.dragInput({ type: 'move', id: 'hand-left', x: 10, y: 0, time: 80 });
     assert.equal(space.focused, null, 'orbiting should release terminal focus');
@@ -501,6 +677,20 @@ function trackedHand(name, dx = 0, dy = 0, scale = 1) {
     landmarks: handFixtures[name].map((point) => ({ ...point, x: point.x * scale + dx, y: point.y * scale + dy, z: point.z * scale })),
     worldLandmarks: handFixtures[name].map(({ x, y, z }) => ({ x: x * scale, y: y * scale, z: z * scale })),
   };
+}
+
+// fetch() will not let us forge a Host header, and forging one is exactly how a
+// DNS-rebinding attack reaches a loopback server.
+function rawRequest(host, port, headers, path) {
+  const lines = Object.entries(headers).map(([name, value]) => `${name}: ${value}`).join('\r\n');
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(port, host, () => socket.write(`GET ${path} HTTP/1.1\r\n${lines}\r\nConnection: close\r\n\r\n`));
+    let response = '';
+    socket.setTimeout(4000, () => socket.destroy());
+    socket.on('data', (chunk) => { response += chunk; });
+    socket.on('close', () => resolve(response));
+    socket.on('error', reject);
+  });
 }
 
 function rejectsWebSocketOrigin(wsBase) {

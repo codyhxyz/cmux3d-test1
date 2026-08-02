@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="CMUX3D">
+  <rect width="512" height="512" rx="112" fill="#0b0e12"/>
+  <g fill="none" stroke="#7aa2f7" stroke-width="18" stroke-linejoin="round">
+    <path d="M256 108 400 190v132l-144 82-144-82V190z"/>
+    <path d="M112 190l144 82 144-82M256 272v132" stroke-opacity="0.55"/>
+  </g>
+  <path d="M196 214l34 30-34 30" fill="none" stroke="#4ade9a" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M258 274h60" stroke="#4ade9a" stroke-width="20" stroke-linecap="round"/>
+</svg>

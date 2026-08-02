@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { DEFAULT_COMPANION_HOST, DEFAULT_COMPANION_PORT } from '../../public/app/connection-config.js';
+import { DEFAULT_HOST_ADDRESS, DEFAULT_HOST_PORT } from '../../public/app/connection-config.js';
 import { paths } from './config.js';
 import { readHerdrState, watchHerdrState } from './herdr-state.js';
 import { createStaticResponder } from './static.js';
@@ -7,6 +7,8 @@ import { TerminalGrid } from './terminal-grid.js';
 import { mountTerminalSocket } from './ws-router.js';
 
 export function createRuntime(options = {}) {
+  // Filled in after listen(), once tailscale detection has run; read per request.
+  const exposure = options.exposure || { active: false, tsOrigin: null };
   const terminalGrid = new TerminalGrid({
     cwd: options.cwd,
     shell: options.shell,
@@ -29,14 +31,16 @@ export function createRuntime(options = {}) {
     ) : null,
     options.webOrigin,
     options.token,
+    exposure,
   ));
-  const socketServer = mountTerminalSocket(server, terminalGrid, options.webOrigin, options.token);
+  const socketServer = mountTerminalSocket(server, terminalGrid, options.webOrigin, options.token, exposure);
   let stopPromise;
 
   const runtime = {
     server,
     socketServer,
     terminalGrid,
+    exposure,
     async start() {
       await terminalGrid.prepare();
       return new Promise((resolve, reject) => {
@@ -50,7 +54,7 @@ export function createRuntime(options = {}) {
         };
         server.once('error', onError);
         server.once('listening', onListening);
-        server.listen(options.port ?? DEFAULT_COMPANION_PORT, options.host || DEFAULT_COMPANION_HOST);
+        server.listen(options.port ?? DEFAULT_HOST_PORT, options.host || DEFAULT_HOST_ADDRESS);
       });
     },
     address() {
