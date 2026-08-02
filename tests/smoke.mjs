@@ -331,6 +331,11 @@ try {
   assert.match(mainSource, /desktopShells\.href = hostHttp\('\/'\)/, 'desktop shells should use the shared host URL');
   assert.match(mainSource, /if \(active\) connectHost\(\)/, 'returning to the tab should re-check the host');
   assert.match(mainSource, /if \(!isPageActive\(\)\) return;/, 'sockets closed by backgrounding must not read as a lost host');
+  assert.match(mainSource, /location\.href = plan\.directUrl/, 'a host with no secure address should be opened for the user, not described to them');
+  // connectHost() runs while this module evaluates, so anything it reads has to be
+  // declared above it or the temporal dead zone turns into a silently caught error.
+  const handoffWindow = mainSource.indexOf('const HANDOFF_WINDOW_MS');
+  assert.ok(handoffWindow > 0 && handoffWindow < mainSource.indexOf('connectHost();'), 'handoff constants must be initialised before the first connect');
   assert.doesNotMatch(mainSource, /companion|showModal/i, 'connection failure should never open a blocking gate');
   assert.doesNotMatch(mainSource, /setInterval/, 'HerdR state should not be polled');
 

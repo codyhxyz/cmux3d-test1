@@ -53,6 +53,10 @@ const shader = startShader(document.getElementById('shader-field'));
 let herdrEvents;
 let herdrRefreshing = false;
 let herdrRefreshQueued = false;
+const HANDOFF_KEY = 'cmux3d.handoff';
+// A bounce-back this fast means the host never answered. Declared here because
+// connectHost() runs while this module is still evaluating.
+const HANDOFF_WINDOW_MS = 12_000;
 let connectionState = 'connecting';
 let connectAttempt = 0;
 
@@ -214,7 +218,17 @@ async function connectHost() {
       hostDirect.href = plan.directUrl;
       hostDirect.hidden = false;
       setConnectionState('unpaired');
-      showMessage(`${plan.host.name} can only be reached over https from this page. Open it directly instead.`);
+      // This page is https and the host has no TLS, so it can only be reached on
+      // its own address. Go there rather than making the user do it by hand. If we
+      // land back here within seconds the host was unreachable, so stop and explain
+      // instead of bouncing the user between two dead ends.
+      if (plan.host.token && !justHandedOff(plan.host.origin)) {
+        rememberHandoff(plan.host.origin);
+        showMessage(`Opening ${plan.host.name} directly…`);
+        location.href = plan.directUrl;
+        return;
+      }
+      showMessage(`${plan.host.name} did not answer. It has no secure address, so it can only be opened directly.`);
       return;
     }
     hostDirect.hidden = true;
@@ -269,6 +283,23 @@ function setConnectionState(state) {
 
 function showMessage(text) {
   connectMessage.textContent = text;
+}
+
+function justHandedOff(origin) {
+  try {
+    const [last, at] = (sessionStorage.getItem(HANDOFF_KEY) || '').split('@');
+    return last === origin && Date.now() - Number(at) < HANDOFF_WINDOW_MS;
+  } catch {
+    return false;
+  }
+}
+
+function rememberHandoff(origin) {
+  try {
+    sessionStorage.setItem(HANDOFF_KEY, `${origin}@${Date.now()}`);
+  } catch {
+    // Private browsing; worst case is one extra hop.
+  }
 }
 
 // The QR only exists once the host reports a tailnet address it can be reached on.

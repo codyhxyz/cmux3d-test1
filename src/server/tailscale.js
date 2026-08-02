@@ -16,11 +16,21 @@ export function findTailscale() {
 
 // Warnings go to stderr, so every parser reads stdout only.
 async function json(binary, args) {
+  const raw = await text(binary, args, 3000);
   try {
-    const { stdout } = await run(binary, args, { timeout: 3000, maxBuffer: 4 << 20 });
-    return JSON.parse(stdout);
+    return JSON.parse(raw);
   } catch {
     return null;
+  }
+}
+
+async function text(binary, args, timeout = 20_000) {
+  try {
+    const { stdout } = await run(binary, args, { timeout, maxBuffer: 4 << 20 });
+    return stdout;
+  } catch (error) {
+    // `tailscale serve` reports "not enabled" on a non-zero exit in some versions.
+    return error.stdout || '';
   }
 }
 
@@ -72,6 +82,22 @@ export function supportsServeBackground(version) {
 
 // Returns the exposure the browser can actually reach, plus everything the CLI told us
 // so index.js can print accurate guidance instead of a raw error.
+// `tailscale serve --bg` blocks for ~30s when Serve is off for the tailnet, so it
+// never runs before listen(). Returns the TLS origin, or the one-click URL that
+// turns Serve on — Tailscale gates it behind a single visit.
+export async function offerServe(port) {
+  const binary = findTailscale();
+  const existing = parseServeStatus(await json(binary, ['serve', 'status', '--json']), port);
+  if (existing.tsOrigin) return { tsOrigin: existing.tsOrigin, funnel: existing.funnel, enableUrl: null };
+
+  const attempt = await text(binary, ['serve', '--bg', String(port)], 30_000);
+  const enableUrl = /https:\/\/login\.tailscale\.com\/f\/serve\?\S+/.exec(attempt || '')?.[0] || null;
+  if (enableUrl) return { tsOrigin: null, funnel: false, enableUrl };
+
+  const served = parseServeStatus(await json(binary, ['serve', 'status', '--json']), port);
+  return { tsOrigin: served.tsOrigin, funnel: served.funnel, enableUrl: null };
+}
+
 export async function detectExposure({ optIn = false, port } = {}) {
   const binary = findTailscale();
   const status = parseStatus(await json(binary, ['status', '--json']));

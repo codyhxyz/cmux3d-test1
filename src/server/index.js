@@ -2,29 +2,31 @@ import { execFile } from 'node:child_process';
 import { pairingUrl } from '../../public/app/connection-config.js';
 import { readServerOptions } from './config.js';
 import { createRuntime } from './runtime.js';
-import { detectExposure, tailnetAddress } from './tailscale.js';
+import { offerServe, tailnetAddress } from './tailscale.js';
 
 const options = readServerOptions();
-// Exposing means binding to the tailnet address itself: reachable from your other
-// devices, invisible to the local network, and it needs no certificate.
 const tailnet = options.expose && !process.env.HOST ? await tailnetAddress() : null;
 if (options.expose && !tailnet) console.log('tailscale: not running, so the cube stays on this computer');
 
-const runtime = createRuntime({ ...options, host: tailnet?.ip || options.host });
+const runtime = createRuntime({
+  ...options,
+  hosts: tailnet ? [options.host, tailnet.ip] : [options.host],
+});
 
-runtime.start().then(async ({ host, port }) => {
+runtime.start().then(({ host, port }) => {
   console.log(`cmux3d is listening at http://${host}:${port}/`);
   if (options.rotated) console.log('pairing code rotated; paired phones must pair again');
 
-  const phoneOrigin = tailnet ? `http://${tailnet.dnsName}:${port}` : null;
-  if (phoneOrigin) {
+  if (tailnet) {
+    const phoneOrigin = `http://${tailnet.dnsName}:${port}`;
     runtime.exposure.active = true;
     runtime.exposure.tsOrigin = phoneOrigin;
     console.log(`tailnet: ${phoneOrigin}`);
     console.log(`  open this on your phone:  ${phoneOrigin}/#token=${encodeURIComponent(options.token)}`);
+    // Slow, and only decides whether the hosted page can also reach us, so it
+    // resolves after the cube is already usable.
+    upgradeToTls(port);
   }
-
-  await announceHostedRoute(port, phoneOrigin);
 
   if (process.env.CMUX3D_OPEN === '0') return;
   const webUrl = pairingUrl(options.webOrigin, `http://127.0.0.1:${port}`, options.token);
@@ -35,29 +37,26 @@ runtime.start().then(async ({ host, port }) => {
   process.exitCode = 1;
 });
 
-// The hosted page is https, so it can only reach a host over TLS — that is the one
-// route that needs `tailscale serve` and a tailnet certificate.
-async function announceHostedRoute(port, phoneOrigin) {
-  const exposure = await detectExposure({ optIn: false, port });
-  if (!exposure.dnsName) return;
+// The hosted page is https, so it can only reach this machine over TLS. That is
+// what Tailscale Serve provides, and the only thing it needs is to be switched on.
+async function upgradeToTls(port) {
+  const serve = await offerServe(port).catch(() => null);
+  if (!serve) return;
 
-  if (exposure.active) {
-    runtime.exposure.active = true;
-    runtime.exposure.tsOrigin = exposure.tsOrigin;
-    console.log(`tailnet TLS: ${exposure.tsOrigin} (tailscale serve)`);
-    if (exposure.funnel) console.log('  warning: funnel is on for this port — it is reachable from the public internet');
-    console.log(`  use ${options.webOrigin} from your phone:  ${pairingUrl(options.webOrigin, exposure.tsOrigin, options.token)}`);
+  if (serve.tsOrigin) {
+    runtime.exposure.tsOrigin = serve.tsOrigin;
+    console.log(`tailnet TLS: ${serve.tsOrigin}`);
+    if (serve.funnel) console.log('  warning: funnel is on for this port — it is reachable from the public internet');
+    console.log(`  ${options.webOrigin} now works on your phone too:`);
+    console.log(`  ${pairingUrl(options.webOrigin, serve.tsOrigin, options.token)}`);
     return;
   }
+  if (!serve.enableUrl) return;
 
-  if (!phoneOrigin) {
-    console.log(`tailscale: ${exposure.dnsName}`);
-    console.log('  put shells on your phone:  npm start -- --expose');
-    return;
-  }
-  if (exposure.status?.certDomains.length) {
-    console.log(`  to use ${options.webOrigin} on the phone instead:  ${exposure.serveCommand}`);
-  }
+  console.log('');
+  console.log(`  Want ${options.webOrigin} itself to work on your phone? Turn on Tailscale Serve once:`);
+  console.log(`  ${serve.enableUrl}`);
+  console.log('  Then restart with --expose. The address above works either way.');
 }
 
 async function shutdown() {

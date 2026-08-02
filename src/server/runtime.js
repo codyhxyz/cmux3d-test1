@@ -20,7 +20,7 @@ export function createRuntime(options = {}) {
     terminalGrid.setTargets(state.map(({ terminalId }) => terminalId));
     return state;
   } : null;
-  const server = http.createServer(createStaticResponder(
+  const respond = createStaticResponder(
     options.publicRoot || paths.public,
     readState,
     options.herdr ? (onChange, onDisconnect) => watchHerdrState(
@@ -32,8 +32,14 @@ export function createRuntime(options = {}) {
     options.webOrigin,
     options.token,
     exposure,
-  ));
-  const socketServer = mountTerminalSocket(server, terminalGrid, options.webOrigin, options.token, exposure);
+  );
+  // Loopback keeps working for this machine while a second address serves the
+  // tailnet, so exposing the cube never takes the desktop flow away.
+  const hosts = options.hosts?.length ? options.hosts : [options.host || DEFAULT_HOST_ADDRESS];
+  const servers = hosts.map(() => http.createServer(respond));
+  const server = servers[0];
+  const socketServers = servers.map((each) => mountTerminalSocket(each, terminalGrid, options.webOrigin, options.token, exposure));
+  const socketServer = socketServers[0];
   let stopPromise;
 
   const runtime = {
@@ -43,19 +49,24 @@ export function createRuntime(options = {}) {
     exposure,
     async start() {
       await terminalGrid.prepare();
-      return new Promise((resolve, reject) => {
-        const onError = (error) => {
-          server.off('listening', onListening);
-          reject(error);
-        };
-        const onListening = () => {
-          server.off('error', onError);
-          resolve(this.address());
-        };
-        server.once('error', onError);
-        server.once('listening', onListening);
-        server.listen(options.port ?? DEFAULT_HOST_PORT, options.host || DEFAULT_HOST_ADDRESS);
-      });
+      // Sequential, because port 0 lets the OS choose and the extra listeners have
+      // to reuse whatever the first one was given.
+      for (const [index, each] of servers.entries()) {
+        await new Promise((resolve, reject) => {
+          const onError = (error) => {
+            each.off('listening', onListening);
+            reject(error);
+          };
+          const onListening = () => {
+            each.off('error', onError);
+            resolve();
+          };
+          each.once('error', onError);
+          each.once('listening', onListening);
+          each.listen(this.address()?.port ?? options.port ?? DEFAULT_HOST_PORT, hosts[index]);
+        });
+      }
+      return this.address();
     },
     address() {
       const info = server.address();
@@ -65,12 +76,14 @@ export function createRuntime(options = {}) {
     stop() {
       if (stopPromise) return stopPromise;
       terminalGrid.closeAll();
-      for (const client of socketServer.clients) client.terminate();
-      socketServer.close();
-      stopPromise = new Promise((resolve) => {
-        server.close(resolve);
-        server.closeAllConnections();
-      });
+      for (const sockets of socketServers) {
+        for (const client of sockets.clients) client.terminate();
+        sockets.close();
+      }
+      stopPromise = Promise.all(servers.map((each) => new Promise((resolve) => {
+        each.close(resolve);
+        each.closeAllConnections();
+      })));
       return stopPromise;
     },
   };
