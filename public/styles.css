@@ -686,7 +686,10 @@ body.is-dragging { cursor: grabbing; }
 }
 
 @media (max-width: 760px), (max-height: 520px) and (pointer: coarse) {
-  :root { --cube: min(77vw, calc(100dvh - 156px - env(safe-area-inset-top) - env(safe-area-inset-bottom)), 500px); }
+  /* svh, not dvh: the dynamic unit tracks the browser chrome collapsing as you
+     scroll, which resized the cube mid-gesture. The small viewport is the one
+     height that is always actually visible, so the cube holds its shape. */
+  :root { --cube: min(77vw, calc(100svh - 156px - env(safe-area-inset-top) - env(safe-area-inset-bottom)), 500px); }
   .viewport { bottom: calc(72px + env(safe-area-inset-bottom)); }
   .dock {
     inset: auto max(10px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
