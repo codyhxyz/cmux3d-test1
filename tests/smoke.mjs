@@ -317,6 +317,11 @@ try {
   assert.match(styles, /\(max-height: 520px\) and \(pointer: coarse\)/, 'short landscape phones should use the mobile controls');
   assert.match(styles, /\.hand-cursor\[data-state="ineligible"\]::after[^}]*content:\s*"Open fingers"/s, 'a rejected pinch should explain how to become eligible');
   assert.match(styles, /@media \(hover: hover\)/, 'hover states must not stick after a tap');
+
+  // Deploys are invisible to returning visitors if the app can be cached without
+  // revalidating, and these filenames carry no content hash.
+  const headers = await readFile(new URL('../web-test/dist/_headers', import.meta.url), 'utf8');
+  assert.match(headers, /^\/\*\n(?:.*\n)*?  Cache-Control: no-cache$/m, 'app assets must revalidate so a deploy reaches people');
   assert.match(styles, /\.panel\.is-focused \.terminal-surface[^{]*\{[^}]*touch-action: pan-y/s, 'scrollback should pan under a finger on the focused face');
   assert.match(styles, /body\.is-keyboard\s*\{[^}]*--cube:/s, 'the cube should shrink to fit above the soft keyboard');
   assert.doesNotMatch(styles, /max-height: calc\(100vh/, 'panel heights should follow the dynamic viewport on phones');

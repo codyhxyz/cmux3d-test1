@@ -15,10 +15,21 @@ for (const [route, source] of VENDOR_ASSETS) {
   await mkdir(path.dirname(target), { recursive: true });
   await cp(path.join(modules, source), target);
 }
+// Filenames are not content-hashed, so without an explicit policy browsers apply
+// heuristic freshness and keep serving yesterday's app for hours after a deploy.
+// `no-cache` still stores the file — it just revalidates, so updates are instant
+// and unchanged files cost a 304.
 await writeFile(path.join(dist, '_headers'), `/*
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   Permissions-Policy: camera=(self)
+  Cache-Control: no-cache
+
+/icons/*
+  Cache-Control: public, max-age=86400
+
+/vendor/mediapipe/*
+  Cache-Control: public, max-age=604800, immutable
 `);
 
 console.log(`Built ${dist}`);
