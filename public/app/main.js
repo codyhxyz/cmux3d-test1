@@ -40,13 +40,11 @@ const statusBanner = document.getElementById('status-banner');
 const lostBanner = document.getElementById('lost-banner');
 const desktopShells = document.getElementById('desktop-shells');
 const connectStatusLabel = document.getElementById('connect-status-label');
-const connectConnected = document.getElementById('connect-connected');
-const connectHostName = document.getElementById('connect-host-name');
 const connectForm = document.getElementById('connect-form');
 const connectHostInput = document.getElementById('connect-host');
 const connectTokenInput = document.getElementById('connect-token');
 const connectMessage = document.getElementById('connect-message');
-const connectSaved = document.getElementById('connect-saved');
+const connectSaved = document.getElementById('host-list');
 const hostDirect = document.getElementById('host-direct');
 const hostQr = document.getElementById('host-qr');
 const shader = startShader(document.getElementById('shader-field'));
@@ -173,7 +171,7 @@ onPageActivity((active) => {
 
 connectForm.addEventListener('submit', (event) => {
   event.preventDefault();
-  const host = setActiveHost(connectHostInput.value, { token: connectTokenInput.value.trim() });
+  const host = switchHost(connectHostInput.value, { token: connectTokenInput.value.trim() });
   if (!host) {
     showMessage('That does not look like an address. Try something like mymac.tailnet.ts.net.');
     return;
@@ -211,6 +209,10 @@ document.getElementById('retry-now').addEventListener('click', () => {
 // to appear; only then is it worth watching loopback.
 document.getElementById('connect-panel').addEventListener('toggle', (event) => {
   if (event.newState === 'open') watchForHost();
+});
+document.getElementById('host-add').addEventListener('click', () => {
+  connectForm.hidden = !connectForm.hidden;
+  if (!connectForm.hidden) connectHostInput.focus();
 });
 document.getElementById('install-copy').addEventListener('click', async (event) => {
   const button = event.currentTarget;
@@ -292,15 +294,28 @@ function setConnectionState(state) {
   connectStatusLabel.textContent = labels[state];
   statusBanner.hidden = state !== 'unpaired';
   lostBanner.hidden = state !== 'lost';
-  connectConnected.hidden = state !== 'connected';
-  connectHostName.textContent = host.name;
   rig.querySelectorAll('[data-agent-status]').forEach((status) => {
     status.textContent = state === 'connected' ? 'unknown' : 'local';
   });
+  renderSavedHosts();
 }
 
 function showMessage(text) {
   connectMessage.textContent = text;
+}
+
+// Keep the click's user activation: browsers use it for the native Local Network
+// permission that protects Tailscale addresses. Reloading here silently denies
+// that permission and also leaves the old host's sockets attached.
+function switchHost(origin, options) {
+  const previous = activeHost().origin;
+  const host = setActiveHost(origin, options);
+  if (host && host.origin !== previous) {
+    fleet.detach();
+    herdrEvents?.close();
+    herdrEvents = null;
+  }
+  return host;
 }
 
 // While the install command is running there is nothing to click, so the page
@@ -376,18 +391,36 @@ async function refreshPairingCode() {
   }
 }
 
+// Every computer this browser knows, the current one marked. Switching is picking
+// one from the list, which is the only mental model the panel needs to teach.
 function renderSavedHosts() {
-  const hosts = listHosts().filter((host) => host.origin !== activeHost().origin);
-  connectSaved.replaceChildren(...hosts.map((host) => {
+  const current = activeHost().origin;
+  // Loopback on a custom port and the default entry are the same machine, so the
+  // list would otherwise show "This computer" twice.
+  const seen = listHosts().filter((host) => {
+    if (!isLoopbackHost(host.origin) || host.origin === current) return true;
+    return !listHosts().some((other) => isLoopbackHost(other.origin) && other.origin === current);
+  });
+  connectSaved.replaceChildren(...seen.map((host) => {
+    const active = host.origin === current;
     const item = document.createElement('li');
+    if (active) item.className = 'is-current';
+
     const use = document.createElement('button');
     use.type = 'button';
-    use.innerHTML = `<strong>${host.name}</strong><small>${host.origin}</small>`;
+    use.setAttribute('aria-current', String(active));
+    use.innerHTML = `<i></i><span><strong>${host.name}</strong><small>${host.origin.replace(/^https?:\/\//, '')}</small></span>`
+      + `<em>${active ? connectionLabel() : lastSeen(host)}</em>`;
     use.addEventListener('click', () => {
-      setActiveHost(host.origin);
-      location.reload();
+      if (active) {
+        connectHost();
+        return;
+      }
+      switchHost(host.origin);
+      connectHost();
     });
     item.append(use);
+
     if (!host.builtIn) {
       const drop = document.createElement('button');
       drop.type = 'button';
@@ -402,7 +435,19 @@ function renderSavedHosts() {
     }
     return item;
   }));
-  connectSaved.hidden = !hosts.length;
+}
+
+function connectionLabel() {
+  return { connected: 'connected', connecting: 'connecting…', lost: 'reconnecting…', unpaired: 'select to connect' }[connectionState];
+}
+
+function lastSeen(host) {
+  if (!host.lastConnected) return '';
+  const minutes = Math.floor((Date.now() - host.lastConnected) / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
 }
 
 function renderFaces() {

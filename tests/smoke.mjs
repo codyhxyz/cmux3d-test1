@@ -330,7 +330,9 @@ try {
   assert.match(homeSource, /install\.sh \| sh/, "onboarding should be one pasteable line, not a build procedure");
   assert.doesNotMatch(homeSource, /npm install|npm start/, "a visitor has not cloned a repo, so do not tell them to build one");
   assert.match(homeSource, /id="connect-panel" popover/, 'the connect flow should be light-dismiss, never a blocking gate');
-  assert.match(homeSource, /id="connect-host"[^>]*placeholder="mymac\.tailnet\.ts\.net"/, 'the connect form should ask for a computer address');
+  assert.match(homeSource, /id="connect-host"[^>]*placeholder="[^"]*ts\.net[^"]*"/, 'the connect form should ask for a computer address');
+  assert.match(homeSource, /id="host-list"/, 'the panel should list the computers you can switch between');
+  assert.match(homeSource, /id="host-add"/, 'adding a computer should be an explicit action');
   assert.match(homeSource, /id="connect-token"/, 'the connect form should ask for a pairing code');
   assert.match(homeSource, /id="key-row"/, 'phones need keys a soft keyboard cannot produce');
   assert.match(homeSource, /data-key="ctrl"[^>]*aria-pressed/, 'the sticky ctrl key should report its armed state');

@@ -27,58 +27,48 @@
       </button>
       <section class="connect-panel" id="connect-panel" popover aria-label="Connect to your computer">
         <header>
-          <strong>Connect to your computer</strong>
+          <strong>Computers</strong>
           <button type="button" popovertarget="connect-panel" popovertargetaction="hide" aria-label="Close">Done</button>
         </header>
 
-        <p class="connect-connected" id="connect-connected" hidden>
-          Connected to <b id="connect-host-name">this computer</b>. Six shells attached.
-        </p>
+        <ul class="host-list" id="host-list"></ul>
 
-        <div class="connect-local">
-          <strong>Run on your computer</strong>
-          <div class="install-line">
-            <code id="install-command">curl -fsSL https://codingcube.codyh.xyz/install.sh | sh</code>
-            <button type="button" id="install-copy">Copy</button>
-          </div>
-          <p class="install-note" id="install-status">Connects automatically. Keep this page open.</p>
-          <a id="desktop-shells" href="http://127.0.0.1:8064/">Open the local workspace</a>
+        <div class="connect-actions connect-actions--top">
+          <button type="button" id="host-add">Add a computer</button>
+          <a id="desktop-shells" href="http://127.0.0.1:8064/">Open locally</a>
         </div>
 
-        <form class="connect-remote" id="connect-form">
-          <strong>Another computer</strong>
-          <label for="connect-host">Computer address
-            <input id="connect-host" name="host" placeholder="mymac.tailnet.ts.net" inputmode="url"
+        <form class="connect-remote" id="connect-form" hidden>
+          <label for="connect-host">Address
+            <input id="connect-host" name="host" placeholder="mymac.tailnet.ts.net or 1.2.3.4:8064" inputmode="url"
               autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false" />
           </label>
-          <label for="connect-token">Pairing code
-            <input id="connect-token" name="token" placeholder="only if asked"
+          <label for="connect-token">Pairing code <span>optional</span>
+            <input id="connect-token" name="token" placeholder="printed by the installer"
               autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false" />
           </label>
           <div class="connect-actions">
             <button type="submit">Connect</button>
-            <button type="button" id="connect-paste">Paste pairing link</button>
+            <button type="button" id="connect-paste">Paste link</button>
           </div>
           <output id="connect-message" aria-live="polite"></output>
           <a id="host-direct" href="#" hidden>Open directly on that computer's address</a>
         </form>
 
-        <ul class="connect-saved" id="connect-saved" hidden></ul>
+        <div class="connect-local">
+          <strong>Add the computer you're on</strong>
+          <div class="install-line">
+            <code id="install-command">curl -fsSL https://codingcube.codyh.xyz/install.sh | sh</code>
+            <button type="button" id="install-copy">Copy</button>
+          </div>
+          <p class="install-note" id="install-status">Appears here on its own. Keep this page open.</p>
+        </div>
 
         <figure class="connect-qr" id="host-qr" hidden>
-          <figcaption>Scan with your phone to pair</figcaption>
+          <figcaption>Scan to open on a phone</figcaption>
           <div id="host-qr-image"></div>
           <code id="host-qr-direct"></code>
         </figure>
-
-        <details class="connect-tailscale">
-          <summary>Reach your computer from anywhere with Tailscale</summary>
-          <ol>
-            <li>Install Tailscale on both devices, signed in to the same account.</li>
-            <li>Install the cube on your computer with the line above. It prints an address like <code>mymac.tailnet.ts.net:8064</code>.</li>
-            <li>Open that link here or scan its QR code — or type the address, like <code>mymac.tailnet.ts.net</code>, with the pairing code above.</li>
-          </ol>
-        </details>
       </section>
       <button class="settings-button" type="button" popovertarget="settings-panel">Settings</button>
       <section class="settings-panel" id="settings-panel" popover aria-label="Workspace settings">

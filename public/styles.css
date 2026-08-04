@@ -313,19 +313,50 @@ body.is-dragging { cursor: grabbing; }
 #connect-message:empty { display: none; }
 #connect-message { color: var(--muted); font-size: 0.74rem; line-height: 1.45; }
 
-.connect-saved { display: grid; gap: 6px; margin: 12px 0 0; padding: 0; list-style: none; }
-.connect-saved[hidden] { display: none; }
-.connect-saved li { display: flex; gap: 6px; align-items: center; }
-.connect-saved li button:first-child {
-  display: grid;
+/* The panel is a list of computers. Which ones you have and which one you are on
+   is the whole model, so it is the first thing in the panel and always visible. */
+.host-list { display: grid; gap: 4px; margin: 0 0 12px; padding: 0; list-style: none; }
+.host-list li { display: flex; gap: 6px; align-items: center; }
+.host-list li > button:first-child {
+  display: flex;
   flex: 1;
-  gap: 1px;
-  justify-items: start;
-  border-color: var(--line);
+  gap: 9px;
+  align-items: center;
+  min-height: 44px;
+  padding: 7px 9px;
+  border-color: transparent;
   text-align: left;
 }
-.connect-saved small { color: var(--muted); font-size: 0.7rem; font-weight: 400; }
+.host-list li.is-current > button:first-child { border-color: var(--line); background: var(--surface-raised); }
+.host-list i {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+.is-connected .host-list li.is-current i { background: var(--signal); }
+.is-connecting .host-list li.is-current i { background: var(--accent); }
+.is-lost .host-list li.is-current i { background: var(--danger); }
+.is-unpaired .host-list li.is-current i { background: var(--danger); }
+.host-list span { display: grid; flex: 1; gap: 1px; min-width: 0; }
+.host-list strong { color: var(--ink); font-size: 0.78rem; }
+.host-list small,
+.host-list em {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.host-list em { flex: none; }
 .connect-remove { flex: none; }
+.connect-actions--top { margin-bottom: 14px; align-items: center; }
+.connect-actions--top a { margin-left: auto; font-size: 0.72rem; }
+.connect-remote[hidden] { display: none; }
+.connect-remote label span { color: var(--muted); font-size: 0.66rem; }
 
 .connect-qr { margin: 14px 0 0; padding-top: 14px; border-top: 1px solid var(--line); text-align: center; }
 .connect-qr[hidden] { display: none; }
