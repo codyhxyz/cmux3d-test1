@@ -329,52 +329,15 @@ function watchForHost(durationMs = WATCH_FOR_MS) {
   setTimeout(tick, 2000);
 }
 
-// The in-page shell's vocabulary. Connecting a computer is a command you can
-// type, so the empty terminal is the onboarding instead of a dead end.
+// Deliberately tiny. Attaching a computer is the interface's job, not something
+// typed at a prompt, so nothing administrative lives in here.
 function shellCommands() {
   return {
     help(_args, { println }) {
-      println('  \x1b[1mconnect\x1b[0m [address]   attach a computer and get real shells');
-      println('  \x1b[1mhosts\x1b[0m               list computers this browser remembers');
-      println('  \x1b[1mforget\x1b[0m <address>    remove a remembered computer');
-      println('  \x1b[1mstatus\x1b[0m              show the current connection');
-      println('  \x1b[1mclear\x1b[0m               clear this terminal');
-      println('');
-      println('To get real shells, run this on your computer:');
-      println('  \x1b[1mcurl -fsSL https://codingcube.codyh.xyz/install.sh | sh\x1b[0m');
-    },
-    status(_args, { println }) {
-      const host = activeHost();
-      println(`  ${connectionState} — ${host.name} (${host.origin})`);
-    },
-    hosts(_args, { println }) {
-      const saved = listHosts();
-      if (!saved.length) {
-        println('  no computers remembered yet');
-        return;
-      }
-      for (const host of saved) println(`  ${host.origin === activeHost().origin ? '*' : ' '} ${host.name}  ${host.origin}`);
-    },
-    forget([address], { println }) {
-      if (!address) throw new Error('usage: forget <address>');
-      removeHost(address);
-      renderSavedHosts();
-      println(`  forgot ${address}`);
+      println('  clear    clear this terminal');
     },
     clear(_args, { term }) {
       term.write('\x1b[2J\x1b[H');
-    },
-    async connect([address], { println }) {
-      if (!address) {
-        println('  opening the connection panel…');
-        document.getElementById('connect-panel').showPopover();
-        return;
-      }
-      const host = setActiveHost(address);
-      if (!host) throw new Error(`${address} is not an address I can reach`);
-      println(`  connecting to ${host.name}…`);
-      await connectHost();
-      println(connectionState === 'connected' ? `  connected to ${host.name}` : `  ${host.name} did not answer`);
     },
   };
 }

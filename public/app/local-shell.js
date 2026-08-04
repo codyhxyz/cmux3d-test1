@@ -1,16 +1,6 @@
 // A real, typeable shell that runs in the page itself, so a terminal is never
-// dead. It is also where connecting to a computer happens, which means the empty
-// state is the onboarding rather than a sign telling you to go elsewhere.
-
-const BANNER = [
-  '\x1b[38;5;39mcmux3d\x1b[0m — this terminal runs in your browser.',
-  '',
-  'For six real shells, run this on your computer:',
-  '  \x1b[1mcurl -fsSL https://codingcube.codyh.xyz/install.sh | sh\x1b[0m',
-  '',
-  'This page connects by itself when it finishes. \x1b[2mhelp\x1b[0m for commands.',
-  '',
-];
+// dead. It prints nothing it was not asked to print: connection state and setup
+// live in the interface, not in the scrollback.
 
 export function createLocalShell({ term, facet, commands }) {
   let line = '';
@@ -101,7 +91,6 @@ export function createLocalShell({ term, facet, commands }) {
     }
   });
 
-  for (const row of BANNER) println(row);
   render();
 
   return {

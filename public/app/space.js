@@ -260,7 +260,9 @@ export class SpaceController {
     if (event.target.closest?.('a, button, input, select, textarea')) return;
     const terminal = event.target.closest?.('.terminal-surface');
     const panel = event.target.closest?.('.panel');
-    if (terminal && Number(panel?.dataset.face) === this.focused && !document.body.classList.contains('is-unpaired')) return;
+    // A focused terminal is always live now, so it owns its own pointer input —
+    // dragging inside it selects text instead of rotating the cube.
+    if (terminal && Number(panel?.dataset.face) === this.focused) return;
     if (!this.dragInput({
       type: 'start',
       id: event.pointerId,

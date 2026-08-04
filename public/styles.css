@@ -255,12 +255,9 @@ body.is-dragging { cursor: grabbing; }
   font-weight: 650;
 }
 .connect-panel strong { font-size: 0.8rem; }
-.connect-lede,
-.connect-connected { margin: 0 0 14px; color: var(--muted); font-size: 0.78rem; line-height: 1.5; }
-.connect-connected { color: var(--ink); }
+.connect-connected { margin: 0 0 14px; color: var(--ink); font-size: 0.78rem; line-height: 1.5; }
 .connect-connected[hidden] { display: none; }
-/* Once paired, the pitch and the local setup steps are answered questions. */
-.is-connected .connect-lede,
+/* Once attached, the setup steps are an answered question. */
 .is-connected .connect-local { display: none; }
 .connect-panel ol { margin: 6px 0 10px; padding-left: 18px; color: var(--muted); font-size: 0.76rem; line-height: 1.6; }
 .connect-panel code {

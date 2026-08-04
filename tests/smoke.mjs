@@ -290,7 +290,7 @@ try {
   assert.match(homeSource, /momentum-duration/, 'settings should expose the momentum slider');
   assert.match(homeSource, /zero-gravity/, 'settings should expose the zero-gravity toggle');
   assert.match(homeSource, /hand-control/, 'settings should expose the opt-in hand control');
-  assert.match(homeSource, /This terminal runs in your browser/, "an unattached cube should still be a working terminal");
+  assert.match(homeSource, /No computer attached/, "an unattached cube should say so plainly");
   assert.match(homeSource, /install\.sh \| sh/, "onboarding should be one pasteable line, not a build procedure");
   assert.doesNotMatch(homeSource, /npm install|npm start/, "a visitor has not cloned a repo, so do not tell them to build one");
   assert.match(homeSource, /id="connect-panel" popover/, 'the connect flow should be light-dismiss, never a blocking gate');
@@ -655,10 +655,11 @@ function checkTwoInputSpace() {
     listeners.get('pointerdown')({ target: linkTarget, pointerId: 2, clientX: 20, clientY: 20, timeStamp: 64 });
     assert.equal(pointerCaptures, 0, 'links inside the viewport should retain native click behavior');
 
+    // Terminals are live whether or not a computer is attached, so a drag inside
+    // a focused one selects text and never rotates the cube.
     classes.add('is-unpaired');
     listeners.get('pointerdown')({ target, pointerId: 2, clientX: 20, clientY: 20, timeStamp: 65 });
-    assert.equal(pointerCaptures, 1, 'unpaired faces should remain draggable after they are focused');
-    listeners.get('pointerup')({ type: 'pointerup', pointerId: 2, timeStamp: 66 });
+    assert.equal(pointerCaptures, 0, 'dragging inside a focused terminal should select text, not orbit');
     classes.remove('is-unpaired');
 
     space.dragInput({ type: 'start', id: 'hand-left', x: 0, y: 0, time: 70 });

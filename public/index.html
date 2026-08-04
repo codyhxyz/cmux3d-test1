@@ -35,15 +35,13 @@
           Connected to <b id="connect-host-name">this computer</b>. Six shells attached.
         </p>
 
-        <p class="connect-lede">Six real shells, running on a computer you own. Nothing runs in the cloud.</p>
-
         <div class="connect-local">
-          <strong>Paste this into your terminal</strong>
+          <strong>Run on your computer</strong>
           <div class="install-line">
             <code id="install-command">curl -fsSL https://codingcube.codyh.xyz/install.sh | sh</code>
             <button type="button" id="install-copy">Copy</button>
           </div>
-          <p class="install-note" id="install-status">This page connects the moment it finishes — leave it open.</p>
+          <p class="install-note" id="install-status">Connects automatically. Keep this page open.</p>
           <a id="desktop-shells" href="http://127.0.0.1:8064/">Open the local workspace</a>
         </div>
 
@@ -128,9 +126,8 @@
 
     <main class="viewport" id="viewport" aria-label="Rotatable terminal cube">
       <p class="status-banner" id="status-banner" aria-live="polite" hidden>
-        <strong>This terminal runs in your browser.</strong>
-        <span>One line gets you six real shells.</span>
-        <button type="button" popovertarget="connect-panel">Show me</button>
+        <span>No computer attached.</span>
+        <button type="button" popovertarget="connect-panel">Attach</button>
       </p>
       <p class="status-banner status-banner--lost" id="lost-banner" aria-live="assertive" hidden>
         <strong>Connection lost.</strong>
