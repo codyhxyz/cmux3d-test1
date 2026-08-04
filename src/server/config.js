@@ -22,6 +22,7 @@ export function readServerOptions(env = process.env, argv = process.argv) {
     herdr: !env.CMUX3D_HERDR || env.CMUX3D_HERDR === '0' ? null : env.CMUX3D_HERDR,
     workspace: env.CMUX3D_WORKSPACE || DEFAULT_WORKSPACE,
     webOrigin: env.CMUX3D_WEB_ORIGIN || DEFAULT_WEB_ORIGIN,
+    gatewayOnly: env.CMUX3D_GATEWAY_ONLY === '1',
     // The env override is honoured but never written to disk.
     token: env.CMUX3D_TOKEN || (rotate ? rotateToken(env) : loadOrCreateToken(env)),
     rotated: rotate && !env.CMUX3D_TOKEN,

@@ -25,7 +25,7 @@ function needsPairing(pathname) {
   return pathname === '/health' || pathname.startsWith('/api/');
 }
 
-export function createStaticResponder(publicRoot, readHerdrState, watchHerdrState, webOrigin, token, exposure, tailnet) {
+export function createStaticResponder(publicRoot, readHerdrState, watchHerdrState, webOrigin, token, exposure, tailnet, gatewayOnly = false) {
   const root = path.resolve(publicRoot);
   const modules = path.resolve(root, '..', 'node_modules');
   const vendorFiles = new Map(VENDOR_ASSETS.map(([route, source]) => [route, path.join(modules, source)]));
@@ -121,6 +121,11 @@ export function createStaticResponder(publicRoot, readHerdrState, watchHerdrStat
       } catch {
         if (!closed) res.end();
       }
+      return;
+    }
+
+    if (gatewayOnly) {
+      sendText(res, 404, 'terminal gateway');
       return;
     }
 

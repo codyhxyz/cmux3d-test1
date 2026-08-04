@@ -59,8 +59,12 @@ stays on loopback while Tailscale provides TLS and authenticated identity:
 ```bash
 CMUX3D_TAILSCALE=serve \
 CMUX3D_TAILSCALE_USERS="you@example.com" \
+CMUX3D_GATEWAY_ONLY=1 \
 CMUX3D_HERDR=herdr npm start
 ```
+
+`CMUX3D_GATEWAY_ONLY=1` keeps the visual app on the hosted site; that process
+serves only health, Herdr state, events, and terminal WebSockets.
 
 The hosted cube can then connect without a pairing prompt on devices signed into
 that tailnet. `CMUX3D_TAILSCALE_USERS` is an optional comma-separated allowlist;

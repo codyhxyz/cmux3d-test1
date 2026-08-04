@@ -33,6 +33,7 @@ export function createRuntime(options = {}) {
     options.token,
     exposure,
     options.tailnet,
+    options.gatewayOnly,
   );
   // Loopback keeps working for this machine while a second address serves the
   // tailnet, so exposing the cube never takes the desktop flow away.

@@ -33,6 +33,7 @@ import { createTailnetIdentity, parseServeIdentity, parseServeStatus, parseStatu
 import { loadOrCreateToken, rotateToken } from '../src/server/token-store.js';
 
 await checkHerdrStateEndpoint();
+await checkGatewayOnly();
 
 assert.equal(commandKeyInput({ key: 'ArrowLeft', metaKey: true }), '\x01', 'command-left should move to the start of the shell input');
 assert.equal(commandKeyInput({ key: 'ArrowRight', metaKey: true }), '\x05', 'command-right should move to the end of the shell input');
@@ -80,6 +81,7 @@ const tokenEnv = { CMUX3D_STATE_DIR: tokenDir };
 assert.equal(readServerOptions(tokenEnv, []).herdr, null, 'a clean install should start ordinary shells without Herdr setup');
 assert.equal(readServerOptions({ ...tokenEnv, CMUX3D_HERDR: 'herdr' }, []).herdr, 'herdr', 'Herdr attachment should remain an explicit option');
 assert.equal(readServerOptions(tokenEnv, []).expose, false, 'exposing the cube to a tailnet should stay opt-in');
+assert.equal(readServerOptions({ ...tokenEnv, CMUX3D_GATEWAY_ONLY: '1' }, []).gatewayOnly, true, 'the cloud host should expose terminals without serving a second cube');
 assert.equal(readServerOptions(tokenEnv, ['--expose']).expose, true, '--expose should opt in to tailnet exposure');
 assert.equal(readServerOptions({ ...tokenEnv, CMUX3D_TAILSCALE: 'serve' }, []).serveOnly, true, 'a cloud gateway should use Tailscale Serve without binding to the tailnet IP');
 assert.deepEqual(
@@ -462,6 +464,17 @@ try {
   console.log('smoke ok');
 } finally {
   await runtime.stop();
+}
+
+async function checkGatewayOnly() {
+  const runtime = createRuntime({ host: '127.0.0.1', port: 0, gatewayOnly: true });
+  try {
+    const { host, port } = await runtime.start();
+    assert.equal((await fetch(`http://${host}:${port}/health`)).status, 200, 'the terminal gateway should keep its health route');
+    assert.equal((await fetch(`http://${host}:${port}/`)).status, 404, 'the terminal gateway must not serve another copy of the hosted cube');
+  } finally {
+    await runtime.stop();
+  }
 }
 
 async function checkHerdrStateEndpoint() {
