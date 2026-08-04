@@ -20,14 +20,15 @@ CMUX3D_WORKDIR="$PWD" npm start
 PORT=8070 CMUX3D_OPEN=0 npm start
 ```
 
-To attach an existing six-tab Herdr workspace instead of starting ordinary shells:
+To use persistent Herdr terminals instead of disposable shells:
 
 ```bash
 CMUX3D_HERDR=herdr npm start
 CMUX3D_HERDR=herdr CMUX3D_WORKSPACE="My Cube" npm start
 ```
 
-Herdr mode expects exactly one configured workspace containing one terminal tab named `Face 1` through `Face 6`; unrelated tabs are ignored.
+Herdr mode idempotently creates the workspace and its `Face 1` through `Face 6`
+tabs when missing. Existing faces and unrelated workspaces or tabs are left alone.
 
 ## Controls
 
@@ -52,9 +53,22 @@ That binds to your tailnet address and prints a link like `http://mymac.tail1234
 
 Once connected, tap a face to focus it and the keyboard comes up. A key row above the keyboard carries `esc`, `tab`, a sticky `ctrl`, arrows, and paste. Tap away from the cube to release.
 
-To reach the cube through the hosted page at <https://codingcube.codyh.xyz> instead of the tailnet address, that page is https, so it needs a TLS route to your computer: run `tailscale serve --bg 8064`, which requires HTTPS certificates enabled for your tailnet. CMUX3D detects this and prints the pairing link and a scannable QR code when it is available. This is a convenience, not a requirement — the direct address above gives you the same shells.
+To reach terminals through the hosted cube, use Tailscale Serve. The gateway
+stays on loopback while Tailscale provides TLS and authenticated identity:
 
-Exposure is opt-in. Without `--expose` the server stays on loopback, and `--expose` binds only to the tailnet interface, so the local network cannot see it. Anything reaching the server from beyond loopback must present the pairing code, whether or not it sends a browser `Origin` header.
+```bash
+CMUX3D_TAILSCALE=serve \
+CMUX3D_TAILSCALE_USERS="you@example.com" \
+CMUX3D_HERDR=herdr npm start
+```
+
+The hosted cube can then connect without a pairing prompt on devices signed into
+that tailnet. `CMUX3D_TAILSCALE_USERS` is an optional comma-separated allowlist;
+a request outside it can still use the ordinary pairing-code path. Serve strips
+spoofed identity headers before forwarding requests to the loopback gateway.
+
+Direct exposure remains opt-in with `--expose`. It binds only the tailnet
+interface, never the LAN or public internet.
 
 ## Verify
 

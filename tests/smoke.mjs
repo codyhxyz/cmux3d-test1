@@ -7,7 +7,7 @@ import WebSocket from 'ws';
 import { HandController, handSample } from '../public/app/hand-tracking.js';
 import { herdrMetadata } from '../public/app/herdr.js';
 import { accessoryKeyInput, commandKeyInput, commandPromptDirection, ctrlCode, promptLine } from '../public/app/terminal-keys.js';
-import { mixedContentBlocked, normalizeHostOrigin, pairingUrl, parseFragment } from '../public/app/connection-config.js';
+import { DEFAULT_CLOUD_HOST_ORIGIN, mixedContentBlocked, normalizeHostOrigin, pairingUrl, parseFragment } from '../public/app/connection-config.js';
 import qrcode from 'qrcode-generator';
 import {
   DAMPING,
@@ -26,10 +26,10 @@ import {
 } from '../public/app/space.js';
 import { VENDOR_ASSETS } from '../src/vendor-assets.js';
 import { readServerOptions } from '../src/server/config.js';
-import { selectCubeFaces } from '../src/server/herdr-state.js';
+import { cubeSetupPlan, selectCubeFaces } from '../src/server/herdr-state.js';
 import { browserOriginAllowed } from '../src/server/origin.js';
 import { createRuntime } from '../src/server/runtime.js';
-import { parseServeStatus, parseStatus, parseWhois, supportsServeBackground } from '../src/server/tailscale.js';
+import { parseServeIdentity, parseServeStatus, parseStatus, parseWhois, supportsServeBackground } from '../src/server/tailscale.js';
 import { loadOrCreateToken, rotateToken } from '../src/server/token-store.js';
 
 await checkHerdrStateEndpoint();
@@ -81,6 +81,12 @@ assert.equal(readServerOptions(tokenEnv, []).herdr, null, 'a clean install shoul
 assert.equal(readServerOptions({ ...tokenEnv, CMUX3D_HERDR: 'herdr' }, []).herdr, 'herdr', 'Herdr attachment should remain an explicit option');
 assert.equal(readServerOptions(tokenEnv, []).expose, false, 'exposing the cube to a tailnet should stay opt-in');
 assert.equal(readServerOptions(tokenEnv, ['--expose']).expose, true, '--expose should opt in to tailnet exposure');
+assert.equal(readServerOptions({ ...tokenEnv, CMUX3D_TAILSCALE: 'serve' }, []).serveOnly, true, 'a cloud gateway should use Tailscale Serve without binding to the tailnet IP');
+assert.deepEqual(
+  readServerOptions({ ...tokenEnv, CMUX3D_TAILSCALE_USERS: 'me@example.com, other@example.com ' }, []).tailscaleUsers,
+  ['me@example.com', 'other@example.com'],
+  'the optional Tailscale identity allowlist should be configuration, not another login flow',
+);
 const firstToken = loadOrCreateToken(tokenEnv);
 assert.equal(loadOrCreateToken(tokenEnv), firstToken, 'pairing should survive a restart so phones stay paired');
 assert.equal((await stat(path.join(tokenDir, 'token'))).mode & 0o777, 0o600, 'the pairing code should not be world readable');
@@ -88,6 +94,7 @@ assert.notEqual(rotateToken(tokenEnv), firstToken, 'rotating should invalidate t
 assert.equal(readServerOptions({ ...tokenEnv, CMUX3D_TOKEN: 'from-env' }, []).token, 'from-env', 'an explicit token should win over the stored one');
 await rm(tokenDir, { recursive: true, force: true });
 
+assert.equal(DEFAULT_CLOUD_HOST_ORIGIN, 'https://cloud-agent.tail47c266.ts.net', 'the hosted cube should know its cloud terminal gateway without pairing');
 assert.equal(normalizeHostOrigin('mymac.tailnet.ts.net'), 'https://mymac.tailnet.ts.net', 'a bare address needs TLS to be reachable from the hosted page');
 assert.equal(normalizeHostOrigin('127.0.0.1:8064'), 'http://127.0.0.1:8064', 'loopback stays plain http');
 assert.equal(normalizeHostOrigin('https://mymac.ts.net/'), 'https://mymac.ts.net', 'a pasted URL should reduce to its origin');
@@ -141,6 +148,12 @@ assert.deepEqual(
 );
 assert.equal(parseWhois(null), null, 'an address tailscale does not know is not a peer');
 assert.equal(parseWhois({}), null, 'an empty whois answer is not a peer');
+assert.deepEqual(
+  parseServeIdentity({ 'tailscale-user-login': 'me@example.com' }),
+  { node: null, login: 'me@example.com' },
+  'the cloud gateway should consume the identity authenticated by Tailscale Serve',
+);
+assert.equal(parseServeIdentity({}), null, 'ordinary proxy headers must not invent a Tailscale identity');
 
 // QR encoding is qrcode-generator's job; this pins that a real pairing link fits
 // and that the vendored module is the one the browser will load.
@@ -234,7 +247,17 @@ checkTwoInputSpace();
 
 const webOrigin = 'https://cube.example';
 const token = 'test-pairing-token';
-const runtime = createRuntime({ host: '127.0.0.1', port: 0, shell: '/bin/sh', webOrigin, token });
+const runtime = createRuntime({
+  host: '127.0.0.1',
+  port: 0,
+  shell: '/bin/sh',
+  webOrigin,
+  token,
+  tailnet: {
+    identifyHeaders: (headers) => headers['tailscale-user-login'] === 'me@example.com' ? { login: 'me@example.com' } : null,
+    identify: async () => null,
+  },
+});
 
 try {
   const { host, port } = await runtime.start();
@@ -254,6 +277,16 @@ try {
   const forwarded = { 'x-forwarded-for': '100.64.0.5' };
   assert.equal((await fetch(`${httpBase}/health`, { headers: forwarded })).status, 401, 'a forwarded request must pair even without an Origin header');
   assert.equal((await fetch(`${httpBase}/api/herdr/state`, { headers: forwarded })).status, 401, 'forwarded API access must pair');
+  assert.equal(
+    (await fetch(`${httpBase}/health`, { headers: { ...forwarded, origin: webOrigin, 'tailscale-user-login': 'me@example.com' } })).status,
+    200,
+    'the hosted cube should work immediately for the identity authenticated by Tailscale Serve',
+  );
+  assert.equal(
+    (await fetch(`${httpBase}/health`, { headers: { ...forwarded, origin: webOrigin, 'tailscale-user-login': 'random@example.com' } })).status,
+    401,
+    'an unapproved identity must not gain a shell merely by knowing the gateway address',
+  );
   assert.equal((await fetch(`${httpBase}/health?token=${token}`, { headers: forwarded })).status, 200, 'a paired phone should reach the host over the tailnet');
   assert.equal((await fetch(`${httpBase}/`, { headers: forwarded })).status, 200, 'the app shell must load before a phone can present its pairing code');
   assert.equal((await fetch(`${httpBase}/health`)).status, 200, 'local tools share the trust domain of the shells they open');
@@ -559,6 +592,23 @@ fi
       }).length,
       6,
       'unrelated tabs should not prevent the six named cube faces from attaching',
+    );
+    assert.deepEqual(
+      cubeSetupPlan({ result: { snapshot: { workspaces: [], tabs: [] } } }),
+      { workspaceId: null, renameTabId: null, createFaces: [1, 2, 3, 4, 5, 6] },
+      'a missing cube workspace should be provisioned instead of requiring setup instructions',
+    );
+    assert.deepEqual(
+      cubeSetupPlan({
+        result: {
+          snapshot: {
+            workspaces: [{ workspace_id: 'fresh', label: 'Coding Cube' }],
+            tabs: [{ tab_id: 'fresh:t1', workspace_id: 'fresh', label: '1' }],
+          },
+        },
+      }),
+      { workspaceId: 'fresh', renameTabId: 'fresh:t1', createFaces: [1, 2, 3, 4, 5, 6] },
+      'a pristine Herdr workspace should reuse its first tab rather than leave junk behind',
     );
     assert.throws(
       () => selectCubeFaces({ result: { snapshot: { ...snapshot, workspaces: [] } } }),

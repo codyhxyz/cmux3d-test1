@@ -5,14 +5,15 @@ import { createRuntime } from './runtime.js';
 import { createTailnetIdentity, offerServe, tailnetAddress } from './tailscale.js';
 
 const options = readServerOptions();
-// If you are on a tailnet, your other devices are already yours — so the cube is
-// there without a flag. CMUX3D_LOCAL_ONLY=1 keeps it on this machine.
-const tailnet = process.env.CMUX3D_LOCAL_ONLY === '1' || process.env.HOST ? null : await tailnetAddress();
-const peers = tailnet && options.trustTailnet ? createTailnetIdentity() : null;
+const useTailnet = options.expose || options.serveOnly;
+const tailnet = useTailnet && process.env.CMUX3D_LOCAL_ONLY !== '1' ? await tailnetAddress() : null;
+const peers = tailnet && options.trustTailnet
+  ? createTailnetIdentity({ allowedLogins: options.tailscaleUsers })
+  : null;
 
 const runtime = createRuntime({
   ...options,
-  hosts: tailnet ? [options.host, tailnet.ip] : [options.host],
+  hosts: options.expose && tailnet ? [options.host, tailnet.ip] : [options.host],
   tailnet: peers,
 });
 
@@ -20,7 +21,7 @@ runtime.start().then(({ host, port }) => {
   console.log(`cmux3d is listening at http://${host}:${port}/`);
   if (options.rotated) console.log('pairing code rotated; paired phones must pair again');
 
-  if (tailnet) {
+  if (options.expose && tailnet) {
     const phoneOrigin = `http://${tailnet.dnsName}:${port}`;
     runtime.exposure.active = true;
     runtime.exposure.tsOrigin = phoneOrigin;
@@ -29,10 +30,11 @@ runtime.start().then(({ host, port }) => {
     console.log(`  \x1b[1m${phoneOrigin}\x1b[0m${peers ? '' : `/#token=${encodeURIComponent(options.token)}`}`);
     if (peers) console.log('  (no code needed — Tailscale already knows your devices)');
     console.log('');
-    // Slow, and only decides whether the hosted page can also reach us, so it
-    // resolves after the cube is already usable.
-    upgradeToTls(port);
   }
+
+  // TLS is deliberately separate from direct tailnet binding: a cloud gateway
+  // stays on loopback and lets Tailscale Serve authenticate every request.
+  if (tailnet) upgradeToTls(port);
 
   if (process.env.CMUX3D_OPEN === '0') return;
   const webUrl = pairingUrl(options.webOrigin, `http://127.0.0.1:${port}`, options.token);
@@ -50,6 +52,7 @@ async function upgradeToTls(port) {
   if (!serve) return;
 
   if (serve.tsOrigin) {
+    runtime.exposure.active = true;
     runtime.exposure.tsOrigin = serve.tsOrigin;
     console.log(`tailnet TLS: ${serve.tsOrigin}`);
     if (serve.funnel) console.log('  warning: funnel is on for this port — it is reachable from the public internet');

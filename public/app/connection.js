@@ -1,4 +1,5 @@
 import {
+  DEFAULT_CLOUD_HOST_ORIGIN,
   DEFAULT_HOST_ORIGIN,
   DEFAULT_WEB_ORIGIN,
   isLoopbackHostname,
@@ -9,6 +10,10 @@ import {
 
 const STORE_KEY = 'cmux3d.hosts.v1';
 const LEGACY_TOKEN_KEY = 'cmux3d-token';
+const BUILT_IN_HOSTS = {
+  [DEFAULT_CLOUD_HOST_ORIGIN]: { origin: DEFAULT_CLOUD_HOST_ORIGIN, name: 'Cloud Agent', token: '', builtIn: true },
+  [DEFAULT_HOST_ORIGIN]: { origin: DEFAULT_HOST_ORIGIN, name: 'This computer', token: '', builtIn: true },
+};
 
 export const hosted = location.origin === DEFAULT_WEB_ORIGIN;
 
@@ -29,6 +34,7 @@ export function setActiveHost(input, { token, name } = {}) {
   if (!origin) return null;
   const existing = store.hosts[origin];
   store.hosts[origin] = {
+    ...existing,
     origin,
     name: name || existing?.name || hostName(origin),
     token: token ?? existing?.token ?? '',
@@ -41,6 +47,7 @@ export function setActiveHost(input, { token, name } = {}) {
 }
 
 export function removeHost(origin) {
+  if (store.hosts[origin]?.builtIn) return;
   delete store.hosts[origin];
   if (store.activeOrigin === origin) store.activeOrigin = listHosts()[0]?.origin || defaultOrigin();
   writeStore();
@@ -89,7 +96,7 @@ function hostUrl(path) {
 }
 
 function defaultOrigin() {
-  return hosted ? DEFAULT_HOST_ORIGIN : location.origin;
+  return hosted ? DEFAULT_CLOUD_HOST_ORIGIN : location.origin;
 }
 
 function hostName(origin) {
@@ -123,11 +130,13 @@ function migrateLegacyToken() {
 }
 
 function readStore() {
-  const empty = { version: 1, activeOrigin: '', hosts: {} };
+  const empty = { version: 1, activeOrigin: '', hosts: { ...BUILT_IN_HOSTS } };
   try {
     const parsed = JSON.parse(localStorage.getItem(STORE_KEY) || '');
     if (parsed?.version !== 1 || !parsed.hosts) return empty;
-    return { ...empty, ...parsed };
+    const hosts = { ...BUILT_IN_HOSTS, ...parsed.hosts };
+    for (const [origin, builtIn] of Object.entries(BUILT_IN_HOSTS)) hosts[origin] = { ...builtIn, ...hosts[origin], builtIn: true };
+    return { ...empty, ...parsed, hosts };
   } catch {
     return empty;
   }

@@ -63,14 +63,27 @@ export function parseWhois(envelope) {
   };
 }
 
+// Serve removes spoofed copies of these headers before adding its authenticated
+// identity. The gateway still listens on loopback so requests cannot bypass it.
+export function parseServeIdentity(headers) {
+  const login = headers?.['tailscale-user-login'];
+  if (!login || Array.isArray(login)) return null;
+  return { node: null, login: String(login) };
+}
+
 // `tailscale whois` is Tailscale's own answer to "who is this peer", so identity
 // comes from tailscaled rather than from us matching addresses ourselves. Cached
 // briefly because it is a subprocess on the request path.
-export function createTailnetIdentity({ ttlMs = 60_000 } = {}) {
+export function createTailnetIdentity({ ttlMs = 60_000, allowedLogins = [] } = {}) {
   const binary = findTailscale();
   const cache = new Map();
+  const allowed = new Set(allowedLogins.map((login) => login.toLowerCase()));
+  const accept = (profile) => profile && (!allowed.size || allowed.has(profile.login?.toLowerCase())) ? profile : null;
 
   return {
+    identifyHeaders(headers) {
+      return accept(parseServeIdentity(headers));
+    },
     async identify(address) {
       const ip = String(address || '').replace(/^::ffff:/, '');
       if (!ip) return null;
@@ -78,7 +91,7 @@ export function createTailnetIdentity({ ttlMs = 60_000 } = {}) {
       const cached = cache.get(ip);
       if (cached && Date.now() - cached.at < ttlMs) return cached.profile;
 
-      const profile = parseWhois(await json(binary, ['whois', '--json', ip]));
+      const profile = accept(parseWhois(await json(binary, ['whois', '--json', ip])));
       cache.set(ip, { at: Date.now(), profile });
       return profile;
     },

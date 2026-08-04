@@ -1,6 +1,7 @@
 export const DEFAULT_HOST_ADDRESS = '127.0.0.1';
 export const DEFAULT_HOST_PORT = 8064;
 export const DEFAULT_HOST_ORIGIN = `http://${DEFAULT_HOST_ADDRESS}:${DEFAULT_HOST_PORT}`;
+export const DEFAULT_CLOUD_HOST_ORIGIN = 'https://cloud-agent.tail47c266.ts.net';
 export const DEFAULT_WEB_ORIGIN = 'https://codingcube.codyh.xyz';
 
 export function isLoopbackHostname(hostname) {

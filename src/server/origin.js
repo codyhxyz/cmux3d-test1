@@ -35,10 +35,14 @@ export async function requestAuthorized(req, requestUrl, options = {}) {
   if (!requestIsRemote(req) && (!origin || isLoopbackOrigin(origin)) && origin !== webOrigin) return true;
   if (tokensMatch(requestUrl.searchParams.get('token'), token)) return true;
 
-  // Otherwise ask Tailscale who this is: a device it vouches for is already
-  // authenticated, more strongly than a code in a URL could manage. Uses the
-  // real peer address, so a forged header cannot reach this.
-  if (!tailnet || origin === webOrigin) return false;
+  // Tailscale Serve strips spoofed identity headers and adds the authenticated
+  // user's login before proxying to our loopback-only cloud gateway.
+  if (!tailnet) return false;
+  if (isLoopbackAddress(req.socket?.remoteAddress) && tailnet.identifyHeaders(req.headers)) return true;
+
+  // Direct tailnet access uses tailscaled's whois result for the real peer IP.
+  // Hosted cross-origin requests must use Serve so identity headers are present.
+  if (origin === webOrigin) return false;
   return Boolean(await tailnet.identify(req.socket?.remoteAddress));
 }
 

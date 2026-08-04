@@ -18,12 +18,61 @@ const EVENT_TYPES = [
 export const DEFAULT_WORKSPACE = 'Coding Cube';
 
 export async function readHerdrState(executable = 'herdr', workspaceLabel = DEFAULT_WORKSPACE) {
-  const envelope = JSON.parse((await execFileAsync(
-    executable,
-    ['--session', 'default', 'api', 'snapshot'],
-    { maxBuffer: 10 * 1024 * 1024 },
-  )).stdout);
+  return cubeState(await runHerdr(executable, ['api', 'snapshot']), workspaceLabel);
+}
 
+// The cube owns one ordinary Herdr workspace. Make its six tabs idempotently so
+// local and cloud hosts need no separate setup ceremony, while leaving every
+// unrelated workspace and tab alone.
+export async function ensureCubeWorkspace(executable = 'herdr', workspaceLabel = DEFAULT_WORKSPACE, cwd = process.cwd()) {
+  let envelope = await runHerdr(executable, ['api', 'snapshot']);
+  const plan = cubeSetupPlan(envelope, workspaceLabel);
+  let workspaceId = plan.workspaceId;
+
+  if (!workspaceId) {
+    const created = await runHerdr(executable, ['workspace', 'create', '--cwd', cwd, '--label', workspaceLabel, '--no-focus']);
+    workspaceId = created.result.workspace.workspace_id;
+    await runHerdr(executable, ['tab', 'rename', created.result.tab.tab_id, 'Face 1']);
+    plan.createFaces.shift();
+  } else if (plan.renameTabId) {
+    await runHerdr(executable, ['tab', 'rename', plan.renameTabId, 'Face 1']);
+    plan.createFaces.shift();
+  }
+
+  for (const face of plan.createFaces) {
+    await runHerdr(executable, ['tab', 'create', '--workspace', workspaceId, '--cwd', cwd, '--label', `Face ${face}`, '--no-focus']);
+  }
+
+  if (!plan.workspaceId || plan.renameTabId || plan.createFaces.length) {
+    envelope = await runHerdr(executable, ['api', 'snapshot']);
+  }
+  return cubeState(envelope, workspaceLabel);
+}
+
+export function cubeSetupPlan(envelope, workspaceLabel = DEFAULT_WORKSPACE) {
+  const snapshot = envelope?.result?.snapshot;
+  if (!snapshot) throw new Error('HerdR snapshot is missing');
+
+  const workspaces = snapshot.workspaces.filter(({ label }) => label === workspaceLabel);
+  if (workspaces.length > 1) {
+    throw new Error(`expected at most one HerdR workspace named "${workspaceLabel}"; found ${workspaces.length}`);
+  }
+  if (!workspaces.length) return { workspaceId: null, renameTabId: null, createFaces: [1, 2, 3, 4, 5, 6] };
+
+  const workspaceId = workspaces[0].workspace_id;
+  const tabs = snapshot.tabs.filter(({ workspace_id }) => workspace_id === workspaceId);
+  const createFaces = [];
+  for (let face = 1; face <= FACE_COUNT; face += 1) {
+    const matches = tabs.filter(({ label }) => label === `Face ${face}`);
+    if (matches.length > 1) throw new Error(`HerdR workspace "${workspaceLabel}" contains duplicate tabs named "Face ${face}"`);
+    if (!matches.length) createFaces.push(face);
+  }
+
+  const seed = createFaces.length === FACE_COUNT && tabs.length === 1 && /^\d+$/.test(tabs[0].label) ? tabs[0].tab_id : null;
+  return { workspaceId, renameTabId: seed, createFaces };
+}
+
+function cubeState(envelope, workspaceLabel) {
   return selectCubeFaces(envelope, workspaceLabel).map(({ face, workspace, tab, pane }) => ({
     face,
     session: 'default',
@@ -44,6 +93,11 @@ export async function readHerdrState(executable = 'herdr', workspaceLabel = DEFA
       },
     },
   }));
+}
+
+async function runHerdr(executable, args) {
+  const { stdout } = await execFileAsync(executable, ['--session', 'default', ...args], { maxBuffer: 10 * 1024 * 1024 });
+  return JSON.parse(stdout);
 }
 
 export function selectCubeFaces(envelope, workspaceLabel = DEFAULT_WORKSPACE) {

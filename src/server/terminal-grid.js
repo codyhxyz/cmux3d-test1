@@ -1,6 +1,6 @@
 import os from 'node:os';
 import pty from 'node-pty';
-import { DEFAULT_WORKSPACE, readHerdrState } from './herdr-state.js';
+import { DEFAULT_WORKSPACE, ensureCubeWorkspace, readHerdrState } from './herdr-state.js';
 import { chooseShell, repairDarwinPtyHelper, resolveExecutable } from './shell.js';
 
 const FACE_MIN = 0;
@@ -19,13 +19,18 @@ export class TerminalGrid {
     this.workspace = workspace;
     this.targets = [];
     this.preparedAt = 0;
+    this.workspaceReady = false;
     if (herdr && !this.herdr) throw new Error(`executable not found: ${herdr}`);
     this.sessions = new Map();
   }
 
   async prepare() {
     if (!this.herdr || Date.now() - this.preparedAt < 1000) return;
-    this.setTargets((await readHerdrState(this.herdr, this.workspace)).map(({ terminalId }) => terminalId));
+    const state = this.workspaceReady
+      ? await readHerdrState(this.herdr, this.workspace)
+      : await ensureCubeWorkspace(this.herdr, this.workspace, this.cwd);
+    this.workspaceReady = true;
+    this.setTargets(state.map(({ terminalId }) => terminalId));
   }
 
   setTargets(targets) {

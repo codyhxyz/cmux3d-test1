@@ -387,16 +387,19 @@ function renderSavedHosts() {
       setActiveHost(host.origin);
       location.reload();
     });
-    const drop = document.createElement('button');
-    drop.type = 'button';
-    drop.className = 'connect-remove';
-    drop.setAttribute('aria-label', `Forget ${host.name}`);
-    drop.textContent = '✕';
-    drop.addEventListener('click', () => {
-      removeHost(host.origin);
-      renderSavedHosts();
-    });
-    item.append(use, drop);
+    item.append(use);
+    if (!host.builtIn) {
+      const drop = document.createElement('button');
+      drop.type = 'button';
+      drop.className = 'connect-remove';
+      drop.setAttribute('aria-label', `Forget ${host.name}`);
+      drop.textContent = '✕';
+      drop.addEventListener('click', () => {
+        removeHost(host.origin);
+        renderSavedHosts();
+      });
+      item.append(drop);
+    }
     return item;
   }));
   connectSaved.hidden = !hosts.length;
