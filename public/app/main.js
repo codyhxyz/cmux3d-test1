@@ -207,8 +207,14 @@ document.getElementById('retry-now').addEventListener('click', () => {
   fleet.retryNow();
   connectHost();
 });
+// Opening the panel or taking the command is the signal that a host may be about
+// to appear; only then is it worth watching loopback.
+document.getElementById('connect-panel').addEventListener('toggle', (event) => {
+  if (event.newState === 'open') watchForHost();
+});
 document.getElementById('install-copy').addEventListener('click', async (event) => {
   const button = event.currentTarget;
+  watchForHost();
   try {
     await navigator.clipboard.writeText(document.getElementById('install-command').textContent.trim());
     button.textContent = 'Copied';
@@ -273,7 +279,6 @@ async function connectHost() {
   } catch {
     if (attempt === connectAttempt) setConnectionState(wasConnected ? 'lost' : 'unpaired');
   }
-  if (connectionState !== 'connected') watchForHost();
 }
 
 function setConnectionState(state) {
@@ -298,20 +303,28 @@ function showMessage(text) {
   connectMessage.textContent = text;
 }
 
-// While the install command is running there is nothing to click: the page keeps
-// looking, so finishing it is the whole ceremony. Chained timeouts rather than an
-// interval, so a slow probe can never stack requests on itself.
-let watching = false;
-function watchForHost() {
-  if (watching || !isLoopbackHost()) return;
-  watching = true;
+// While the install command is running there is nothing to click, so the page
+// watches loopback and finishing the command becomes the whole ceremony. Bounded
+// on purpose: a visitor who is not installing anything should not have their
+// browser hammering localhost in the background. Chained timeouts rather than an
+// interval, so a slow probe cannot stack requests on itself.
+const WATCH_FOR_MS = 5 * 60_000;
+let watchingUntil = 0;
+
+function watchForHost(durationMs = WATCH_FOR_MS) {
+  if (!isLoopbackHost()) return;
+  const alreadyWatching = watchingUntil > Date.now();
+  watchingUntil = Math.max(watchingUntil, Date.now() + durationMs);
+  if (alreadyWatching) return;
+
   const tick = async () => {
-    if (connectionState === 'connected') {
-      watching = false;
+    if (connectionState === 'connected' || Date.now() > watchingUntil) {
+      watchingUntil = 0;
       return;
     }
     if (isPageActive()) await connectHost();
-    setTimeout(tick, connectionState === 'connected' ? 4000 : 2000);
+    if (connectionState !== 'connected') setTimeout(tick, 2000);
+    else watchingUntil = 0;
   };
   setTimeout(tick, 2000);
 }
