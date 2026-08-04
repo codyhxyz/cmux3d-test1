@@ -29,7 +29,7 @@ import { readServerOptions } from '../src/server/config.js';
 import { cubeSetupPlan, selectCubeFaces } from '../src/server/herdr-state.js';
 import { browserOriginAllowed } from '../src/server/origin.js';
 import { createRuntime } from '../src/server/runtime.js';
-import { parseServeIdentity, parseServeStatus, parseStatus, parseWhois, supportsServeBackground } from '../src/server/tailscale.js';
+import { createTailnetIdentity, parseServeIdentity, parseServeStatus, parseStatus, parseWhois, supportsServeBackground } from '../src/server/tailscale.js';
 import { loadOrCreateToken, rotateToken } from '../src/server/token-store.js';
 
 await checkHerdrStateEndpoint();
@@ -154,6 +154,9 @@ assert.deepEqual(
   'the cloud gateway should consume the identity authenticated by Tailscale Serve',
 );
 assert.equal(parseServeIdentity({}), null, 'ordinary proxy headers must not invent a Tailscale identity');
+const privateTailnet = createTailnetIdentity({ allowedLogins: ['me@example.com'] });
+assert.equal(privateTailnet.identifyHeaders({ 'tailscale-user-login': 'ME@example.com' })?.login, 'ME@example.com', 'the configured Tailscale user should pass without another prompt');
+assert.equal(privateTailnet.identifyHeaders({ 'tailscale-user-login': 'random@example.com' }), null, 'other tailnet users must stay outside the terminal gateway');
 
 // QR encoding is qrcode-generator's job; this pins that a real pairing link fits
 // and that the vendored module is the one the browser will load.
