@@ -276,7 +276,7 @@ try {
   assert.match(homeSource, /momentum-duration/, 'settings should expose the momentum slider');
   assert.match(homeSource, /zero-gravity/, 'settings should expose the zero-gravity toggle');
   assert.match(homeSource, /hand-control/, 'settings should expose the opt-in hand control');
-  assert.match(homeSource, /No computer connected/, 'an unpaired cube should say what is missing');
+  assert.match(homeSource, /Running in your browser/, "an unattached cube should still be a working terminal");
   assert.match(homeSource, /id="connect-panel" popover/, 'the connect flow should be light-dismiss, never a blocking gate');
   assert.match(homeSource, /id="connect-host"[^>]*placeholder="mymac\.tailnet\.ts\.net"/, 'the connect form should ask for a computer address');
   assert.match(homeSource, /id="connect-token"/, 'the connect form should ask for a pairing code');

@@ -2,22 +2,45 @@ import { AttachAddon } from '/vendor/addon-attach.mjs';
 import { isPageActive } from './activity.js';
 import { hostWebSocket } from './connection.js';
 import { accessoryKeyInput, commandKeyInput, commandPromptDirection, ctrlCode, promptLine } from './terminal-keys.js';
+import { createLocalShell } from './local-shell.js';
 import { FitAddon } from '/vendor/addon-fit.mjs';
 import { WebglAddon } from '/vendor/addon-webgl.mjs';
 import { Terminal } from '/vendor/xterm.mjs';
 import { FACETS } from './facets.js';
 
 export class TerminalFleet {
-  constructor({ slot = 0, onConnection = () => {}, onCtrlChange = () => {} } = {}) {
+  constructor({ slot = 0, onConnection = () => {}, onCtrlChange = () => {}, commands = {} } = {}) {
     this.slot = slot;
     this.entries = new Map();
     this.resizeObserver = new ResizeObserver(() => this.fitAll());
     this.onConnection = onConnection;
     this.onCtrlChange = onCtrlChange;
+    this.commands = commands;
     this.focusedFace = null;
     this.ctrlArmed = false;
     this.openCount = 0;
     this.started = false;
+    // Terminals exist from the first paint; a computer only replaces what is
+    // running in them. There is no state in which you cannot type.
+    this.attached = false;
+  }
+
+  // Called once a host is reachable; until then every face runs the local shell.
+  attach() {
+    this.attached = true;
+    for (const entry of this.entries.values()) {
+      if (!entry.ws && isPageActive()) this.#connect(entry);
+    }
+  }
+
+  detach() {
+    this.attached = false;
+    for (const entry of this.entries.values()) {
+      const ws = entry.ws;
+      entry.ws = null;
+      ws?.close();
+      this.#openLocalShell(entry);
+    }
   }
 
   start() {
@@ -71,12 +94,11 @@ export class TerminalFleet {
       } catch (error) {
         console.warn(`WebGL renderer unavailable for ${facet.name}; using xterm fallback`, error);
       }
-      term.write(`\x1b[36mopening ${facet.name.toLowerCase()} channel…\x1b[0m\r\n`);
-
-      const entry = { facet, term, fit, ws: null, failures: 0, openedAt: 0 };
+      const entry = { facet, term, fit, ws: null, failures: 0, openedAt: 0, shell: null };
       this.entries.set(facet.face, entry);
       this.resizeObserver.observe(host);
-      if (isPageActive()) this.#connect(entry);
+      if (this.attached && isPageActive()) this.#connect(entry);
+      else this.#openLocalShell(entry);
     }
   }
 
@@ -117,6 +139,7 @@ export class TerminalFleet {
   }
 
   retryNow() {
+    if (!this.attached) return;
     for (const entry of this.entries.values()) {
       if (!entry.ws) {
         entry.failures = 0;
@@ -139,7 +162,7 @@ export class TerminalFleet {
   setWindowActive(active) {
     for (const entry of this.entries.values()) {
       entry.term.options.cursorBlink = active;
-      if (active && !entry.ws) this.#connect(entry);
+      if (this.attached && active && !entry.ws) this.#connect(entry);
       if (!active && entry.ws) {
         const ws = entry.ws;
         entry.ws = null;
@@ -173,6 +196,17 @@ export class TerminalFleet {
     }, true);
   }
 
+  #openLocalShell(entry) {
+    if (entry.shell) return;
+    entry.term.write('\x1b[2J\x1b[H');
+    entry.shell = createLocalShell({ term: entry.term, facet: entry.facet, commands: this.commands });
+  }
+
+  #closeLocalShell(entry) {
+    entry.shell?.dispose();
+    entry.shell = null;
+  }
+
   #connect(entry) {
     const ws = new WebSocket(hostWebSocket(`/ws/pty?face=${entry.facet.face}&slot=${this.slot}`));
     let attach;
@@ -181,6 +215,9 @@ export class TerminalFleet {
 
     ws.addEventListener('open', () => {
       entry.openedAt = Date.now();
+      // The local shell hands the keyboard over to the real one.
+      this.#closeLocalShell(entry);
+      entry.term.write('\x1b[2J\x1b[H');
       attach = new AttachAddon(ws);
       entry.term.loadAddon(attach);
       this.#sendSize(entry);
@@ -205,8 +242,10 @@ export class TerminalFleet {
       if (Date.now() - entry.openedAt >= 30_000) entry.failures = 0;
       const delay = Math.min(1000 * 2 ** entry.failures++, 60_000);
       entry.term.write(`\r\n\x1b[33mchannel closed; retrying in ${Math.ceil(delay / 1000)}s…\x1b[0m\r\n`);
+      // Hand the keyboard back so the terminal stays usable while the shell is gone.
+      this.#openLocalShell(entry);
       setTimeout(() => {
-        if (isPageActive() && !entry.ws) this.#connect(entry);
+        if (this.attached && isPageActive() && !entry.ws) this.#connect(entry);
       }, delay);
     });
   }

@@ -558,14 +558,8 @@ body.is-dragging { cursor: grabbing; }
 .panel.is-focused .terminal-surface .xterm,
 .panel.is-focused .terminal-surface .xterm-screen,
 .panel.is-focused .terminal-surface .xterm-viewport { touch-action: pan-y; }
-.is-unpaired .terminal-surface {
-  display: grid;
-  place-items: center;
-  color: var(--muted);
-  font: 0.72rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-  text-align: center;
-}
-.is-unpaired .terminal-surface::before { content: "No computer connected\A\A Drag to orbit\A Pinch or scroll to zoom"; white-space: pre; }
+/* No empty state: every face runs a real terminal whether or not a computer
+   is attached, so nothing is painted over the top of them. */
 .rig.is-translucent .panel { backface-visibility: visible; }
 
 .panel--front { transform: translateZ(var(--half)); }
@@ -719,7 +713,6 @@ body.is-dragging { cursor: grabbing; }
   .on-fine,
   .connect-local { display: none; }
   .on-coarse { display: inline; }
-  .is-unpaired .terminal-surface::before { content: "No computer connected\A\A Drag to orbit\A Pinch to zoom"; }
   .is-terminal-focused .dock { display: none; }
 }
 

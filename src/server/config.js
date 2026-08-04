@@ -26,5 +26,8 @@ export function readServerOptions(env = process.env, argv = process.argv) {
     token: env.CMUX3D_TOKEN || (rotate ? rotateToken(env) : loadOrCreateToken(env)),
     rotated: rotate && !env.CMUX3D_TOKEN,
     expose: env.CMUX3D_TAILSCALE === '1' || argv.includes('--expose'),
+    // Tailscale authenticates your devices already; asking them for a code too
+    // buys nothing. CMUX3D_REQUIRE_CODE=1 demands one anyway.
+    trustTailnet: env.CMUX3D_REQUIRE_CODE !== '1',
   };
 }

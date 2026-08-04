@@ -32,13 +32,14 @@ export function createRuntime(options = {}) {
     options.webOrigin,
     options.token,
     exposure,
+    options.tailnet,
   );
   // Loopback keeps working for this machine while a second address serves the
   // tailnet, so exposing the cube never takes the desktop flow away.
   const hosts = options.hosts?.length ? options.hosts : [options.host || DEFAULT_HOST_ADDRESS];
   const servers = hosts.map(() => http.createServer(respond));
   const server = servers[0];
-  const socketServers = servers.map((each) => mountTerminalSocket(each, terminalGrid, options.webOrigin, options.token, exposure));
+  const socketServers = servers.map((each) => mountTerminalSocket(each, terminalGrid, options.webOrigin, options.token, exposure, options.tailnet));
   const socketServer = socketServers[0];
   let stopPromise;
 

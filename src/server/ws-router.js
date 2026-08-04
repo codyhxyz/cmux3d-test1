@@ -1,7 +1,7 @@
 import { WebSocketServer } from 'ws';
 import { browserOriginAllowed, requestAuthorized, requestIsRemote } from './origin.js';
 
-export function mountTerminalSocket(httpServer, terminalGrid, webOrigin, token, exposure) {
+export function mountTerminalSocket(httpServer, terminalGrid, webOrigin, token, exposure, tailnet) {
   const wss = new WebSocketServer({ noServer: true });
 
   httpServer.on('upgrade', (req, socket, head) => {
@@ -17,7 +17,7 @@ export function mountTerminalSocket(httpServer, terminalGrid, webOrigin, token, 
       socket.destroy();
       return;
     }
-    if (!requestAuthorized(req, requestUrl, { webOrigin, token, exposure })) {
+    if (!requestAuthorized(req, requestUrl, { webOrigin, token, exposure, tailnet })) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
       return;

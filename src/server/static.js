@@ -24,7 +24,7 @@ function needsPairing(pathname) {
   return pathname === '/health' || pathname.startsWith('/api/');
 }
 
-export function createStaticResponder(publicRoot, readHerdrState, watchHerdrState, webOrigin, token, exposure) {
+export function createStaticResponder(publicRoot, readHerdrState, watchHerdrState, webOrigin, token, exposure, tailnet) {
   const root = path.resolve(publicRoot);
   const modules = path.resolve(root, '..', 'node_modules');
   const vendorFiles = new Map(VENDOR_ASSETS.map(([route, source]) => [route, path.join(modules, source)]));
@@ -46,7 +46,7 @@ export function createStaticResponder(publicRoot, readHerdrState, watchHerdrStat
     }
 
     const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-    if (needsPairing(requestUrl.pathname) && !requestAuthorized(req, requestUrl, { webOrigin, token, exposure })) {
+    if (needsPairing(requestUrl.pathname) && !requestAuthorized(req, requestUrl, { webOrigin, token, exposure, tailnet })) {
       sendText(res, 401, 'pairing required');
       return;
     }

@@ -2,15 +2,19 @@ import { execFile } from 'node:child_process';
 import { pairingUrl } from '../../public/app/connection-config.js';
 import { readServerOptions } from './config.js';
 import { createRuntime } from './runtime.js';
-import { offerServe, tailnetAddress } from './tailscale.js';
+import { offerServe, tailnetAddress, watchTailnetPeers } from './tailscale.js';
 
 const options = readServerOptions();
-const tailnet = options.expose && !process.env.HOST ? await tailnetAddress() : null;
-if (options.expose && !tailnet) console.log('tailscale: not running, so the cube stays on this computer');
+// If you are on a tailnet, your other devices are already yours — so the cube is
+// there without a flag. CMUX3D_LOCAL_ONLY=1 keeps it on this machine.
+const tailnet = process.env.CMUX3D_LOCAL_ONLY === '1' || process.env.HOST ? null : await tailnetAddress();
+const peers = tailnet && options.trustTailnet ? watchTailnetPeers() : null;
+if (peers) await peers.ready;
 
 const runtime = createRuntime({
   ...options,
   hosts: tailnet ? [options.host, tailnet.ip] : [options.host],
+  tailnet: peers,
 });
 
 runtime.start().then(({ host, port }) => {
@@ -21,8 +25,11 @@ runtime.start().then(({ host, port }) => {
     const phoneOrigin = `http://${tailnet.dnsName}:${port}`;
     runtime.exposure.active = true;
     runtime.exposure.tsOrigin = phoneOrigin;
-    console.log(`tailnet: ${phoneOrigin}`);
-    console.log(`  open this on your phone:  ${phoneOrigin}/#token=${encodeURIComponent(options.token)}`);
+    console.log('');
+    console.log('  On your phone, open:');
+    console.log(`  \x1b[1m${phoneOrigin}\x1b[0m${peers ? '' : `/#token=${encodeURIComponent(options.token)}`}`);
+    if (peers) console.log('  (no code needed — Tailscale already knows your devices)');
+    console.log('');
     // Slow, and only decides whether the hosted page can also reach us, so it
     // resolves after the cube is already usable.
     upgradeToTls(port);

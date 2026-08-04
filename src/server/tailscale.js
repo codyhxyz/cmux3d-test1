@@ -55,6 +55,41 @@ export async function tailnetAddress() {
   return status?.running && status.ip ? { ip: status.ip, dnsName: status.dnsName } : null;
 }
 
+export function parsePeerAddresses(envelope) {
+  const addresses = new Set();
+  for (const node of [envelope?.Self, ...Object.values(envelope?.Peer || {})]) {
+    for (const address of node?.TailscaleIPs || []) addresses.add(address);
+  }
+  return addresses;
+}
+
+// Devices in your tailnet are already cryptographically authenticated by
+// Tailscale, so they do not need a second pairing code on top. Refreshed on a
+// timer rather than per request, because auth checks have to be synchronous.
+export function watchTailnetPeers({ intervalMs = 60_000 } = {}) {
+  const binary = findTailscale();
+  let addresses = new Set();
+  let stopped = false;
+
+  const refresh = async () => {
+    const envelope = await json(binary, ['status', '--json']);
+    if (envelope && !stopped) addresses = parsePeerAddresses(envelope);
+  };
+
+  const timer = setInterval(refresh, intervalMs);
+  timer.unref?.();
+  const ready = refresh();
+
+  return {
+    ready,
+    has: (address) => addresses.has(String(address || '').replace(/^::ffff:/, '')),
+    stop() {
+      stopped = true;
+      clearInterval(timer);
+    },
+  };
+}
+
 export function parseServeStatus(envelope, port) {
   if (!envelope?.Web) return { tsOrigin: null, funnel: false };
   const suffix = `:${port}`;

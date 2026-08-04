@@ -71,6 +71,7 @@ const fleet = new TerminalFleet({
   onCtrlChange(armed) {
     keyRow.setCtrl(armed);
   },
+  commands: shellCommands(),
 });
 const space = new SpaceController({
   viewport,
@@ -79,7 +80,8 @@ const space = new SpaceController({
     fleet.focus(face);
     shader.setFocus(face);
     updatePortState(face);
-    if (connectionState === 'connected' && matchMedia('(pointer: coarse)').matches) {
+    // The local shell is a real terminal, so the keys matter even unattached.
+    if (matchMedia('(pointer: coarse)').matches) {
       document.body.classList.add('is-terminal-focused');
       keyRow.show();
     }
@@ -133,6 +135,9 @@ renderFaces();
 renderPorts();
 renderSavedHosts();
 trackKeyboardInset();
+// Terminals come up immediately and are typeable with or without a computer.
+fleet.start();
+fleet.setWindowActive(isPageActive());
 space.bind();
 connectHost();
 momentumInput.value = String(momentumSliderValue(space.settleSeconds));
@@ -247,8 +252,7 @@ async function connectHost() {
     markConnected();
     setConnectionState('connected');
     showMessage('');
-    fleet.start();
-    fleet.setWindowActive(isPageActive());
+    fleet.attach();
     herdrEvents?.close();
     herdrEvents = new EventSource(hostHttp('/api/herdr/events'));
     herdrEvents.addEventListener('message', refreshHerdrState);
@@ -272,17 +276,62 @@ function setConnectionState(state) {
   lostBanner.hidden = state !== 'lost';
   connectConnected.hidden = state !== 'connected';
   connectHostName.textContent = host.name;
-  if (state !== 'connected') {
-    document.body.classList.remove('is-terminal-focused');
-    keyRow.hide();
-  }
   rig.querySelectorAll('[data-agent-status]').forEach((status) => {
-    status.textContent = state === 'connected' ? 'unknown' : 'offline';
+    status.textContent = state === 'connected' ? 'unknown' : 'local';
   });
 }
 
 function showMessage(text) {
   connectMessage.textContent = text;
+}
+
+// The in-page shell's vocabulary. Connecting a computer is a command you can
+// type, so the empty terminal is the onboarding instead of a dead end.
+function shellCommands() {
+  return {
+    help(_args, { println }) {
+      println('  \x1b[1mconnect\x1b[0m [address]   attach a computer and get real shells');
+      println('  \x1b[1mhosts\x1b[0m               list computers this browser remembers');
+      println('  \x1b[1mforget\x1b[0m <address>    remove a remembered computer');
+      println('  \x1b[1mstatus\x1b[0m              show the current connection');
+      println('  \x1b[1mclear\x1b[0m               clear this terminal');
+      println('');
+      println('Run \x1b[1mnpm start\x1b[0m on your computer and it will appear here by itself.');
+    },
+    status(_args, { println }) {
+      const host = activeHost();
+      println(`  ${connectionState} — ${host.name} (${host.origin})`);
+    },
+    hosts(_args, { println }) {
+      const saved = listHosts();
+      if (!saved.length) {
+        println('  no computers remembered yet');
+        return;
+      }
+      for (const host of saved) println(`  ${host.origin === activeHost().origin ? '*' : ' '} ${host.name}  ${host.origin}`);
+    },
+    forget([address], { println }) {
+      if (!address) throw new Error('usage: forget <address>');
+      removeHost(address);
+      renderSavedHosts();
+      println(`  forgot ${address}`);
+    },
+    clear(_args, { term }) {
+      term.write('\x1b[2J\x1b[H');
+    },
+    async connect([address], { println }) {
+      if (!address) {
+        println('  opening the connection panel…');
+        document.getElementById('connect-panel').showPopover();
+        return;
+      }
+      const host = setActiveHost(address);
+      if (!host) throw new Error(`${address} is not an address I can reach`);
+      println(`  connecting to ${host.name}…`);
+      await connectHost();
+      println(connectionState === 'connected' ? `  connected to ${host.name}` : `  ${host.name} did not answer`);
+    },
+  };
 }
 
 function justHandedOff(origin) {

@@ -27,12 +27,15 @@ export function browserOriginAllowed(origin, options = {}) {
 }
 
 export function requestAuthorized(req, requestUrl, options = {}) {
-  const { webOrigin, token } = options;
+  const { webOrigin, token, tailnet } = options;
   if (!token) return true;
 
   const origin = req.headers.origin;
   // Local tools and the locally served page share the shell's trust domain already.
   if (!requestIsRemote(req) && (!origin || isLoopbackOrigin(origin)) && origin !== webOrigin) return true;
+  // A device in your tailnet was already authenticated by Tailscale itself, which
+  // is stronger than a code in a URL. Requires a real peer address, not a header.
+  if (tailnet?.has(req.socket?.remoteAddress) && origin !== webOrigin) return true;
   return tokensMatch(requestUrl.searchParams.get('token'), token);
 }
 
