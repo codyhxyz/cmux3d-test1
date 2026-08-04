@@ -7,6 +7,7 @@ export const VENDOR_ASSETS = [
   ['/vendor/addon-attach.mjs', '@xterm/addon-attach/lib/addon-attach.mjs'],
   ['/vendor/addon-fit.mjs', '@xterm/addon-fit/lib/addon-fit.mjs'],
   ['/vendor/addon-webgl.mjs', '@xterm/addon-webgl/lib/addon-webgl.mjs'],
+  ['/vendor/qrcode.mjs', 'qrcode-generator/dist/qrcode.mjs'],
   ['/vendor/mediapipe/vision_bundle.mjs', '@mediapipe/tasks-vision/vision_bundle.mjs'],
   ...wasm.map((file) => [`/vendor/mediapipe/wasm/${file}`, `@mediapipe/tasks-vision/wasm/${file}`]),
 ];

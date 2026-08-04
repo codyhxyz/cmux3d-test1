@@ -8,7 +8,7 @@ import { HandController, handSample } from '../public/app/hand-tracking.js';
 import { herdrMetadata } from '../public/app/herdr.js';
 import { accessoryKeyInput, commandKeyInput, commandPromptDirection, ctrlCode, promptLine } from '../public/app/terminal-keys.js';
 import { mixedContentBlocked, normalizeHostOrigin, pairingUrl, parseFragment } from '../public/app/connection-config.js';
-import { encodeQr } from '../public/app/qr.js';
+import qrcode from 'qrcode-generator';
 import {
   DAMPING,
   DRAG_DAMPING,
@@ -24,11 +24,12 @@ import {
   SpaceController,
   STOP_SPEED,
 } from '../public/app/space.js';
+import { VENDOR_ASSETS } from '../src/vendor-assets.js';
 import { readServerOptions } from '../src/server/config.js';
 import { selectCubeFaces } from '../src/server/herdr-state.js';
 import { browserOriginAllowed } from '../src/server/origin.js';
 import { createRuntime } from '../src/server/runtime.js';
-import { parseServeStatus, parseStatus, supportsServeBackground } from '../src/server/tailscale.js';
+import { parseServeStatus, parseStatus, parseWhois, supportsServeBackground } from '../src/server/tailscale.js';
 import { loadOrCreateToken, rotateToken } from '../src/server/token-store.js';
 
 await checkHerdrStateEndpoint();
@@ -131,11 +132,24 @@ assert.deepEqual(parseServeStatus({ Web: { 'mymac.ts.net:443': { Handlers: { '/'
 assert.equal(supportsServeBackground([1, 56]), true, 'tailscale 1.56 introduced the background serve flag');
 assert.equal(supportsServeBackground([1, 40]), false, 'older tailscale needs the manual serve command');
 
-const pairingQr = encodeQr(pairingUrl('https://codingcube.codyh.xyz', 'https://mymac.tail47c266.ts.net', 'K'.repeat(32)));
-assert.equal((pairingQr.size - 17) % 4, 0, 'a QR symbol should have a valid version size');
-assert.equal(pairingQr.modules[0].slice(0, 7).join(''), '1111111', 'the finder pattern should anchor the symbol');
-// Versions 7 and up need the version block, which a real pairing link reaches.
-assert.ok(pairingQr.size >= 45, 'a full pairing link should need a version 7 or larger symbol');
+// Identity comes from `tailscale whois`, so a device Tailscale vouches for needs
+// no second pairing code and an unknown address gets nothing.
+assert.deepEqual(
+  parseWhois({ Node: { Name: 'mymac.tail47c266.ts.net.' }, UserProfile: { LoginName: 'me@example.com' } }),
+  { node: 'mymac.tail47c266.ts.net', login: 'me@example.com' },
+  'a tailnet peer should be identified by tailscaled, not by matching addresses ourselves',
+);
+assert.equal(parseWhois(null), null, 'an address tailscale does not know is not a peer');
+assert.equal(parseWhois({}), null, 'an empty whois answer is not a peer');
+
+// QR encoding is qrcode-generator's job; this pins that a real pairing link fits
+// and that the vendored module is the one the browser will load.
+const pairingCode = qrcode(0, 'M');
+pairingCode.addData(pairingUrl('https://codingcube.codyh.xyz', 'https://mymac.tail47c266.ts.net', 'K'.repeat(32)));
+pairingCode.make();
+assert.equal((pairingCode.getModuleCount() - 17) % 4, 0, 'a QR symbol should have a valid version size');
+assert.ok(pairingCode.isDark(0, 0), 'the finder pattern should anchor the symbol');
+assert.ok(VENDOR_ASSETS.some(([route]) => route === '/vendor/qrcode.mjs'), 'the QR encoder must be vendored for the browser');
 
 assert.deepEqual(
   herdrMetadata({

@@ -55,37 +55,32 @@ export async function tailnetAddress() {
   return status?.running && status.ip ? { ip: status.ip, dnsName: status.dnsName } : null;
 }
 
-export function parsePeerAddresses(envelope) {
-  const addresses = new Set();
-  for (const node of [envelope?.Self, ...Object.values(envelope?.Peer || {})]) {
-    for (const address of node?.TailscaleIPs || []) addresses.add(address);
-  }
-  return addresses;
+export function parseWhois(envelope) {
+  if (!envelope?.Node?.Name) return null;
+  return {
+    node: String(envelope.Node.Name).replace(/\.$/, ''),
+    login: envelope.UserProfile?.LoginName || null,
+  };
 }
 
-// Devices in your tailnet are already cryptographically authenticated by
-// Tailscale, so they do not need a second pairing code on top. Refreshed on a
-// timer rather than per request, because auth checks have to be synchronous.
-export function watchTailnetPeers({ intervalMs = 60_000 } = {}) {
+// `tailscale whois` is Tailscale's own answer to "who is this peer", so identity
+// comes from tailscaled rather than from us matching addresses ourselves. Cached
+// briefly because it is a subprocess on the request path.
+export function createTailnetIdentity({ ttlMs = 60_000 } = {}) {
   const binary = findTailscale();
-  let addresses = new Set();
-  let stopped = false;
-
-  const refresh = async () => {
-    const envelope = await json(binary, ['status', '--json']);
-    if (envelope && !stopped) addresses = parsePeerAddresses(envelope);
-  };
-
-  const timer = setInterval(refresh, intervalMs);
-  timer.unref?.();
-  const ready = refresh();
+  const cache = new Map();
 
   return {
-    ready,
-    has: (address) => addresses.has(String(address || '').replace(/^::ffff:/, '')),
-    stop() {
-      stopped = true;
-      clearInterval(timer);
+    async identify(address) {
+      const ip = String(address || '').replace(/^::ffff:/, '');
+      if (!ip) return null;
+
+      const cached = cache.get(ip);
+      if (cached && Date.now() - cached.at < ttlMs) return cached.profile;
+
+      const profile = parseWhois(await json(binary, ['whois', '--json', ip]));
+      cache.set(ip, { at: Date.now(), profile });
+      return profile;
     },
   };
 }

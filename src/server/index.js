@@ -2,14 +2,13 @@ import { execFile } from 'node:child_process';
 import { pairingUrl } from '../../public/app/connection-config.js';
 import { readServerOptions } from './config.js';
 import { createRuntime } from './runtime.js';
-import { offerServe, tailnetAddress, watchTailnetPeers } from './tailscale.js';
+import { createTailnetIdentity, offerServe, tailnetAddress } from './tailscale.js';
 
 const options = readServerOptions();
 // If you are on a tailnet, your other devices are already yours — so the cube is
 // there without a flag. CMUX3D_LOCAL_ONLY=1 keeps it on this machine.
 const tailnet = process.env.CMUX3D_LOCAL_ONLY === '1' || process.env.HOST ? null : await tailnetAddress();
-const peers = tailnet && options.trustTailnet ? watchTailnetPeers() : null;
-if (peers) await peers.ready;
+const peers = tailnet && options.trustTailnet ? createTailnetIdentity() : null;
 
 const runtime = createRuntime({
   ...options,

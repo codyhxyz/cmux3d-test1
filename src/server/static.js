@@ -47,7 +47,7 @@ export function createStaticResponder(publicRoot, readHerdrState, watchHerdrStat
     }
 
     const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-    if (needsPairing(requestUrl.pathname) && !requestAuthorized(req, requestUrl, { webOrigin, token, exposure, tailnet })) {
+    if (needsPairing(requestUrl.pathname) && !(await requestAuthorized(req, requestUrl, { webOrigin, token, exposure, tailnet }))) {
       sendText(res, 401, 'pairing required');
       return;
     }

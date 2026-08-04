@@ -4,7 +4,7 @@ import { browserOriginAllowed, requestAuthorized, requestIsRemote } from './orig
 export function mountTerminalSocket(httpServer, terminalGrid, webOrigin, token, exposure, tailnet) {
   const wss = new WebSocketServer({ noServer: true });
 
-  httpServer.on('upgrade', (req, socket, head) => {
+  httpServer.on('upgrade', async (req, socket, head) => {
     const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     const allowed = browserOriginAllowed(req.headers.origin, {
       webOrigin,
@@ -17,7 +17,7 @@ export function mountTerminalSocket(httpServer, terminalGrid, webOrigin, token, 
       socket.destroy();
       return;
     }
-    if (!requestAuthorized(req, requestUrl, { webOrigin, token, exposure, tailnet })) {
+    if (!(await requestAuthorized(req, requestUrl, { webOrigin, token, exposure, tailnet }))) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
       return;

@@ -26,17 +26,20 @@ export function browserOriginAllowed(origin, options = {}) {
   }
 }
 
-export function requestAuthorized(req, requestUrl, options = {}) {
+export async function requestAuthorized(req, requestUrl, options = {}) {
   const { webOrigin, token, tailnet } = options;
   if (!token) return true;
 
   const origin = req.headers.origin;
   // Local tools and the locally served page share the shell's trust domain already.
   if (!requestIsRemote(req) && (!origin || isLoopbackOrigin(origin)) && origin !== webOrigin) return true;
-  // A device in your tailnet was already authenticated by Tailscale itself, which
-  // is stronger than a code in a URL. Requires a real peer address, not a header.
-  if (tailnet?.has(req.socket?.remoteAddress) && origin !== webOrigin) return true;
-  return tokensMatch(requestUrl.searchParams.get('token'), token);
+  if (tokensMatch(requestUrl.searchParams.get('token'), token)) return true;
+
+  // Otherwise ask Tailscale who this is: a device it vouches for is already
+  // authenticated, more strongly than a code in a URL could manage. Uses the
+  // real peer address, so a forged header cannot reach this.
+  if (!tailnet || origin === webOrigin) return false;
+  return Boolean(await tailnet.identify(req.socket?.remoteAddress));
 }
 
 // The pairing code is the one credential that unlocks this host from anywhere, so
