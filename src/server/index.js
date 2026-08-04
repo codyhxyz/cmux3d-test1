@@ -57,7 +57,7 @@ async function upgradeToTls(port) {
     console.log(`tailnet TLS: ${serve.tsOrigin}`);
     if (serve.funnel) console.log('  warning: funnel is on for this port — it is reachable from the public internet');
     console.log(`  ${options.webOrigin} now works on your phone too:`);
-    console.log(`  ${pairingUrl(options.webOrigin, serve.tsOrigin, options.token)}`);
+    console.log(`  ${pairingUrl(options.webOrigin, serve.tsOrigin, peers ? '' : options.token)}`);
     return;
   }
   if (!serve.enableUrl) return;
