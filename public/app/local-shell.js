@@ -4,7 +4,11 @@
 
 const BANNER = [
   '\x1b[38;5;39mcmux3d\x1b[0m — this terminal runs in your browser.',
-  'Type \x1b[1mconnect\x1b[0m to attach a computer and get real shells, or \x1b[1mhelp\x1b[0m.',
+  '',
+  'For six real shells, run this on your computer:',
+  '  \x1b[1mcurl -fsSL https://codingcube.codyh.xyz/install.sh | sh\x1b[0m',
+  '',
+  'This page connects by itself when it finishes. \x1b[2mhelp\x1b[0m for commands.',
   '',
 ];
 

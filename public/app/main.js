@@ -207,6 +207,18 @@ document.getElementById('retry-now').addEventListener('click', () => {
   fleet.retryNow();
   connectHost();
 });
+document.getElementById('install-copy').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  try {
+    await navigator.clipboard.writeText(document.getElementById('install-command').textContent.trim());
+    button.textContent = 'Copied';
+  } catch {
+    // Selecting it is the fallback when the clipboard is unavailable.
+    getSelection()?.selectAllChildren(document.getElementById('install-command'));
+    button.textContent = 'Select it';
+  }
+  setTimeout(() => { button.textContent = 'Copy'; }, 1600);
+});
 updateOpacity();
 updateMomentumValue(space.settleSeconds);
 updateHandSensitivity();
@@ -261,6 +273,7 @@ async function connectHost() {
   } catch {
     if (attempt === connectAttempt) setConnectionState(wasConnected ? 'lost' : 'unpaired');
   }
+  if (connectionState !== 'connected') watchForHost();
 }
 
 function setConnectionState(state) {
@@ -285,6 +298,24 @@ function showMessage(text) {
   connectMessage.textContent = text;
 }
 
+// While the install command is running there is nothing to click: the page keeps
+// looking, so finishing it is the whole ceremony. Chained timeouts rather than an
+// interval, so a slow probe can never stack requests on itself.
+let watching = false;
+function watchForHost() {
+  if (watching || !isLoopbackHost()) return;
+  watching = true;
+  const tick = async () => {
+    if (connectionState === 'connected') {
+      watching = false;
+      return;
+    }
+    if (isPageActive()) await connectHost();
+    setTimeout(tick, connectionState === 'connected' ? 4000 : 2000);
+  };
+  setTimeout(tick, 2000);
+}
+
 // The in-page shell's vocabulary. Connecting a computer is a command you can
 // type, so the empty terminal is the onboarding instead of a dead end.
 function shellCommands() {
@@ -296,7 +327,8 @@ function shellCommands() {
       println('  \x1b[1mstatus\x1b[0m              show the current connection');
       println('  \x1b[1mclear\x1b[0m               clear this terminal');
       println('');
-      println('Run \x1b[1mnpm start\x1b[0m on your computer and it will appear here by itself.');
+      println('To get real shells, run this on your computer:');
+      println('  \x1b[1mcurl -fsSL https://codingcube.codyh.xyz/install.sh | sh\x1b[0m');
     },
     status(_args, { println }) {
       const host = activeHost();

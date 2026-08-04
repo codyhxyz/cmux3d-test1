@@ -35,14 +35,15 @@
           Connected to <b id="connect-host-name">this computer</b>. Six shells attached.
         </p>
 
-        <p class="connect-lede">Six real shells run on a computer you own. Pair this page with it — nothing runs in the cloud.</p>
+        <p class="connect-lede">Six real shells, running on a computer you own. Nothing runs in the cloud.</p>
 
         <div class="connect-local">
-          <strong>On this computer</strong>
-          <ol>
-            <li>Get CMUX3D and run <code>npm install</code>.</li>
-            <li>Run <code>npm start</code> — this page connects by itself.</li>
-          </ol>
+          <strong>Paste this into your terminal</strong>
+          <div class="install-line">
+            <code id="install-command">curl -fsSL https://codingcube.codyh.xyz/install.sh | sh</code>
+            <button type="button" id="install-copy">Copy</button>
+          </div>
+          <p class="install-note" id="install-status">This page connects the moment it finishes — leave it open.</p>
           <a id="desktop-shells" href="http://127.0.0.1:8064/">Open the local workspace</a>
         </div>
 
@@ -53,7 +54,7 @@
               autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false" />
           </label>
           <label for="connect-token">Pairing code
-            <input id="connect-token" name="token" placeholder="printed by npm start"
+            <input id="connect-token" name="token" placeholder="only if asked"
               autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false" />
           </label>
           <div class="connect-actions">
@@ -76,7 +77,7 @@
           <summary>Reach your computer from anywhere with Tailscale</summary>
           <ol>
             <li>Install Tailscale on both devices, signed in to the same account.</li>
-            <li>On your computer, run <code>npm start -- --expose</code>. It prints a pairing link and the computer's Tailscale address.</li>
+            <li>Install the cube on your computer with the line above. It prints an address like <code>mymac.tailnet.ts.net:8064</code>.</li>
             <li>Open that link here or scan its QR code — or type the address, like <code>mymac.tailnet.ts.net</code>, with the pairing code above.</li>
           </ol>
         </details>
@@ -127,9 +128,9 @@
 
     <main class="viewport" id="viewport" aria-label="Rotatable terminal cube">
       <p class="status-banner" id="status-banner" aria-live="polite" hidden>
-        <strong>Running in your browser.</strong>
-        <span>Attach a computer for real shells — or type <code>connect</code>.</span>
-        <button type="button" popovertarget="connect-panel">Attach</button>
+        <strong>This terminal runs in your browser.</strong>
+        <span>One line gets you six real shells.</span>
+        <button type="button" popovertarget="connect-panel">Show me</button>
       </p>
       <p class="status-banner status-banner--lost" id="lost-banner" aria-live="assertive" hidden>
         <strong>Connection lost.</strong>

@@ -271,6 +271,35 @@ body.is-dragging { cursor: grabbing; }
   font: 0.72rem ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .connect-local { padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.install-line {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin: 8px 0 6px;
+}
+.install-line code {
+  flex: 1;
+  padding: 9px 10px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  white-space: nowrap;
+  scrollbar-width: none;
+  -webkit-user-select: all;
+  user-select: all;
+}
+.install-line code::-webkit-scrollbar { display: none; }
+.install-line button {
+  flex: none;
+  border-color: var(--line);
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+.install-note { margin: 0 0 10px; color: var(--muted); font-size: 0.72rem; line-height: 1.5; }
 .connect-remote { display: grid; gap: 8px; padding-top: 14px; }
 .connect-remote label { display: grid; gap: 4px; color: var(--muted); font-size: 0.74rem; }
 .connect-remote input {

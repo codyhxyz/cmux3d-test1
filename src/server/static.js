@@ -16,6 +16,7 @@ const contentTypes = new Map([
   ['.png', 'image/png'],
   ['.ico', 'image/x-icon'],
   ['.txt', 'text/plain; charset=utf-8'],
+  ['.sh', 'text/x-shellscript; charset=utf-8'],
 ]);
 
 // The shell is public code, and a phone opening a `#token=` link cannot present the
