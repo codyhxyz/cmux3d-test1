@@ -8,8 +8,10 @@ import {
   parseFragment,
 } from './connection-config.js';
 
-const STORE_KEY = 'cmux3d.hosts.v1';
-const LEGACY_TOKEN_KEY = 'cmux3d-token';
+const STORE_KEY = 'coding-cube.hosts.v1';
+const LEGACY_PREFIX = ['cmux', '3d'].join('');
+const LEGACY_STORE_KEY = `${LEGACY_PREFIX}.hosts.v1`;
+const LEGACY_TOKEN_KEY = `${LEGACY_PREFIX}-token`;
 const BUILT_IN_HOSTS = {
   [DEFAULT_CLOUD_HOST_ORIGIN]: { origin: DEFAULT_CLOUD_HOST_ORIGIN, name: 'Cloud Agent', token: '', builtIn: true },
   [DEFAULT_HOST_ORIGIN]: { origin: DEFAULT_HOST_ORIGIN, name: 'This computer', token: '', builtIn: true },
@@ -132,11 +134,18 @@ function migrateLegacyToken() {
 function readStore() {
   const empty = { version: 1, activeOrigin: '', hosts: { ...BUILT_IN_HOSTS } };
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORE_KEY) || '');
+    const current = localStorage.getItem(STORE_KEY);
+    const legacy = current ? null : localStorage.getItem(LEGACY_STORE_KEY);
+    const parsed = JSON.parse(current || legacy || '');
     if (parsed?.version !== 1 || !parsed.hosts) return empty;
     const hosts = { ...BUILT_IN_HOSTS, ...parsed.hosts };
     for (const [origin, builtIn] of Object.entries(BUILT_IN_HOSTS)) hosts[origin] = { ...builtIn, ...hosts[origin], builtIn: true };
-    return { ...empty, ...parsed, hosts };
+    const migrated = { ...empty, ...parsed, hosts };
+    if (legacy) {
+      localStorage.setItem(STORE_KEY, JSON.stringify(migrated));
+      localStorage.removeItem(LEGACY_STORE_KEY);
+    }
+    return migrated;
   } catch {
     return empty;
   }

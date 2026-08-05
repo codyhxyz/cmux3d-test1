@@ -10,7 +10,7 @@ Developers and agent operators working across several concurrent local shell ses
 
 ## Product Purpose
 
-CMUX3D turns six independent local shells into one rotatable workspace. Success means users can identify, focus, and operate any shell as quickly as they would in a conventional terminal multiplexer.
+Coding Cube turns six independent local shells into one rotatable workspace. Success means users can identify, focus, and operate any shell as quickly as they would in a conventional terminal multiplexer.
 
 ## Brand Personality
 

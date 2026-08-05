@@ -148,7 +148,7 @@ export async function watchHerdrState(executable, onChange, onDisconnect, worksp
 
   await new Promise((resolve, reject) => {
     socket = net.createConnection(socketPath);
-    const id = 'cmux3d';
+    const id = 'coding-cube';
     let buffer = '';
     let ready = false;
 

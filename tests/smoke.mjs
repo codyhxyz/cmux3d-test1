@@ -34,6 +34,7 @@ import { loadOrCreateToken, rotateToken } from '../src/server/token-store.js';
 
 await checkHerdrStateEndpoint();
 await checkGatewayOnly();
+await checkRenamedBrowserStore();
 
 assert.equal(commandKeyInput({ key: 'ArrowLeft', metaKey: true }), '\x01', 'command-left should move to the start of the shell input');
 assert.equal(commandKeyInput({ key: 'ArrowRight', metaKey: true }), '\x05', 'command-right should move to the end of the shell input');
@@ -76,16 +77,16 @@ assert.equal(
   'a site that rebinds its DNS to loopback must not be trusted by its own Host header',
 );
 
-const tokenDir = await mkdtemp(path.join(os.tmpdir(), 'cmux3d-token-'));
-const tokenEnv = { CMUX3D_STATE_DIR: tokenDir };
+const tokenDir = await mkdtemp(path.join(os.tmpdir(), 'coding-cube-token-'));
+const tokenEnv = { CODING_CUBE_STATE_DIR: tokenDir };
 assert.equal(readServerOptions(tokenEnv, []).herdr, null, 'a clean install should start ordinary shells without Herdr setup');
-assert.equal(readServerOptions({ ...tokenEnv, CMUX3D_HERDR: 'herdr' }, []).herdr, 'herdr', 'Herdr attachment should remain an explicit option');
+assert.equal(readServerOptions({ ...tokenEnv, CODING_CUBE_HERDR: 'herdr' }, []).herdr, 'herdr', 'Herdr attachment should remain an explicit option');
 assert.equal(readServerOptions(tokenEnv, []).expose, false, 'exposing the cube to a tailnet should stay opt-in');
-assert.equal(readServerOptions({ ...tokenEnv, CMUX3D_GATEWAY_ONLY: '1' }, []).gatewayOnly, true, 'the cloud host should expose terminals without serving a second cube');
+assert.equal(readServerOptions({ ...tokenEnv, CODING_CUBE_GATEWAY_ONLY: '1' }, []).gatewayOnly, true, 'the cloud host should expose terminals without serving a second cube');
 assert.equal(readServerOptions(tokenEnv, ['--expose']).expose, true, '--expose should opt in to tailnet exposure');
-assert.equal(readServerOptions({ ...tokenEnv, CMUX3D_TAILSCALE: 'serve' }, []).serveOnly, true, 'a cloud gateway should use Tailscale Serve without binding to the tailnet IP');
+assert.equal(readServerOptions({ ...tokenEnv, CODING_CUBE_TAILSCALE: 'serve' }, []).serveOnly, true, 'a cloud gateway should use Tailscale Serve without binding to the tailnet IP');
 assert.deepEqual(
-  readServerOptions({ ...tokenEnv, CMUX3D_TAILSCALE_USERS: 'me@example.com, other@example.com ' }, []).tailscaleUsers,
+  readServerOptions({ ...tokenEnv, CODING_CUBE_TAILSCALE_USERS: 'me@example.com, other@example.com ' }, []).tailscaleUsers,
   ['me@example.com', 'other@example.com'],
   'the optional Tailscale identity allowlist should be configuration, not another login flow',
 );
@@ -93,7 +94,7 @@ const firstToken = loadOrCreateToken(tokenEnv);
 assert.equal(loadOrCreateToken(tokenEnv), firstToken, 'pairing should survive a restart so phones stay paired');
 assert.equal((await stat(path.join(tokenDir, 'token'))).mode & 0o777, 0o600, 'the pairing code should not be world readable');
 assert.notEqual(rotateToken(tokenEnv), firstToken, 'rotating should invalidate the old pairing code');
-assert.equal(readServerOptions({ ...tokenEnv, CMUX3D_TOKEN: 'from-env' }, []).token, 'from-env', 'an explicit token should win over the stored one');
+assert.equal(readServerOptions({ ...tokenEnv, CODING_CUBE_TOKEN: 'from-env' }, []).token, 'from-env', 'an explicit token should win over the stored one');
 await rm(tokenDir, { recursive: true, force: true });
 
 assert.equal(DEFAULT_CLOUD_HOST_ORIGIN, 'https://cloud-agent.tail47c266.ts.net', 'the hosted cube should know its cloud terminal gateway without pairing');
@@ -176,7 +177,7 @@ assert.deepEqual(
         focused_workspace_id: 'w2',
         focused_tab_id: 'w2:t2',
         focused_pane_id: 'w2:p2',
-        workspaces: [{ workspace_id: 'w2', label: 'cmux3d', agent_status: 'idle' }],
+        workspaces: [{ workspace_id: 'w2', label: 'coding-cube', agent_status: 'idle' }],
         tabs: [{ tab_id: 'w2:t2', label: 'Tests', agent_status: 'blocked' }],
         panes: [{ pane_id: 'w2:p2', agent_status: 'working' }],
       },
@@ -324,7 +325,7 @@ try {
   const home = await fetch(`${httpBase}/`);
   assert.equal(home.status, 200, 'index should be served');
   const homeSource = await home.text();
-  assert.match(homeSource, /CMUX3D/, 'index should contain the app shell');
+  assert.match(homeSource, /Coding Cube/, 'index should contain the app shell');
   assert.match(homeSource, /momentum-duration/, 'settings should expose the momentum slider');
   assert.match(homeSource, /zero-gravity/, 'settings should expose the zero-gravity toggle');
   assert.match(homeSource, /hand-control/, 'settings should expose the opt-in hand control');
@@ -360,7 +361,7 @@ try {
 
   // Deploys are invisible to returning visitors if the app can be cached without
   // revalidating, and these filenames carry no content hash.
-  const headers = await readFile(new URL('../web-test/dist/_headers', import.meta.url), 'utf8');
+  const headers = await readFile(new URL('../site/dist/_headers', import.meta.url), 'utf8');
   assert.match(headers, /^\/\*\n(?:.*\n)*?  Cache-Control: no-cache$/m, 'app assets must revalidate so a deploy reaches people');
   assert.match(styles, /\.panel\.is-focused \.terminal-surface[^{]*\{[^}]*touch-action: pan-y/s, 'scrollback should pan under a finger on the focused face');
   assert.match(styles, /body\.is-keyboard\s*\{[^}]*--cube:/s, 'the cube should shrink to fit above the soft keyboard');
@@ -442,15 +443,15 @@ try {
   slot0.input('stty size\r');
   await slot0.waitFor('24 80');
 
-  slot0.input('CMUX3D_PROBE=alpha; printf "probe:%s:%s:%s\\n" "$CMUX3D_FACE" "$CMUX3D_SLOT" "$CMUX3D_PROBE"\r');
+  slot0.input('CODING_CUBE_PROBE=alpha; printf "probe:%s:%s:%s\\n" "$CODING_CUBE_FACE" "$CODING_CUBE_SLOT" "$CODING_CUBE_PROBE"\r');
   await slot0.waitFor('probe:0:0:alpha');
   const replay = await openPty(wsBase, 0, 0);
   await replay.waitFor('probe:0:0:alpha');
 
-  slot1.input('printf "probe:%s:%s:%s\\n" "$CMUX3D_FACE" "$CMUX3D_SLOT" "${CMUX3D_PROBE-empty}"\r');
+  slot1.input('printf "probe:%s:%s:%s\\n" "$CODING_CUBE_FACE" "$CODING_CUBE_SLOT" "${CODING_CUBE_PROBE-empty}"\r');
   await slot1.waitFor('probe:0:1:empty');
 
-  face4.input('printf "probe:%s:%s\\n" "$CMUX3D_FACE" "$CMUX3D_SLOT"\r');
+  face4.input('printf "probe:%s:%s\\n" "$CODING_CUBE_FACE" "$CODING_CUBE_SLOT"\r');
   await face4.waitFor('probe:4:2');
 
   await rejectsInvalidResize(wsBase);
@@ -466,6 +467,39 @@ try {
   await runtime.stop();
 }
 
+async function checkRenamedBrowserStore() {
+  const data = new Map();
+  const storage = {
+    getItem: (key) => data.get(key) ?? null,
+    setItem: (key, value) => data.set(key, value),
+    removeItem: (key) => data.delete(key),
+  };
+  const legacyKey = `${['cmux', '3d'].join('')}.hosts.v1`;
+  data.set(legacyKey, JSON.stringify({
+    version: 1,
+    activeOrigin: 'https://saved.example',
+    hosts: { 'https://saved.example': { origin: 'https://saved.example', name: 'Saved', token: 'secret' } },
+  }));
+  const previous = Object.fromEntries(['location', 'localStorage', 'sessionStorage', 'history'].map((key) => [key, globalThis[key]]));
+  Object.assign(globalThis, {
+    location: { origin: 'https://codingcube.codyh.xyz', protocol: 'https:', hash: '', pathname: '/', search: '' },
+    localStorage: storage,
+    sessionStorage: storage,
+    history: { replaceState() {} },
+  });
+  try {
+    const connection = await import(`../public/app/connection.js?rename-test=${Date.now()}`);
+    assert.equal(connection.activeHost().token, 'secret', 'the product rename must preserve paired computers');
+    assert.equal(data.has(legacyKey), false, 'the old browser key should be removed after migration');
+    assert.ok(data.has('coding-cube.hosts.v1'), 'the renamed browser key should be written');
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete globalThis[key];
+      else globalThis[key] = value;
+    }
+  }
+}
+
 async function checkGatewayOnly() {
   const runtime = createRuntime({ host: '127.0.0.1', port: 0, gatewayOnly: true });
   try {
@@ -478,7 +512,7 @@ async function checkGatewayOnly() {
 }
 
 async function checkHerdrStateEndpoint() {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'cmux3d-herdr-'));
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'coding-cube-herdr-'));
   const executable = path.join(directory, 'herdr');
   const statePath = path.join(directory, 'state.json');
   const socketPath = path.join(directory, 'herdr.sock');
@@ -522,19 +556,19 @@ async function checkHerdrStateEndpoint() {
     eventServer.listen(socketPath, resolve);
   });
 
-  const previousSocket = process.env.CMUX3D_TEST_HERDR_SOCKET;
-  const previousState = process.env.CMUX3D_TEST_HERDR_STATE;
-  process.env.CMUX3D_TEST_HERDR_SOCKET = socketPath;
-  process.env.CMUX3D_TEST_HERDR_STATE = statePath;
+  const previousSocket = process.env.CODING_CUBE_TEST_HERDR_SOCKET;
+  const previousState = process.env.CODING_CUBE_TEST_HERDR_STATE;
+  process.env.CODING_CUBE_TEST_HERDR_SOCKET = socketPath;
+  process.env.CODING_CUBE_TEST_HERDR_STATE = statePath;
   let runtime;
 
   try {
     await writeFile(statePath, JSON.stringify({ result: { snapshot } }));
     await writeFile(executable, `#!/bin/sh
 if [ "$1:$2:$3:$4" = "--session:default:status:server" ]; then
-  printf 'status: running\\nsocket: %s\\n' "$CMUX3D_TEST_HERDR_SOCKET"
+  printf 'status: running\\nsocket: %s\\n' "$CODING_CUBE_TEST_HERDR_SOCKET"
 elif [ "$1:$2:$3:$4" = "--session:default:api:snapshot" ]; then
-  cat "$CMUX3D_TEST_HERDR_STATE"
+  cat "$CODING_CUBE_TEST_HERDR_STATE"
 elif [ "$1:$2:$3:$4" = "--session:default:terminal:attach" ]; then
   printf 'attached:%s\\n' "$5"
   while IFS= read -r line; do printf 'echo:%s:size:%s\\n' "$line" "$(stty size)"; done
@@ -637,10 +671,10 @@ fi
     await runtime?.stop();
     for (const socket of clients) socket.destroy();
     await new Promise((resolve) => eventServer.close(resolve));
-    if (previousSocket === undefined) delete process.env.CMUX3D_TEST_HERDR_SOCKET;
-    else process.env.CMUX3D_TEST_HERDR_SOCKET = previousSocket;
-    if (previousState === undefined) delete process.env.CMUX3D_TEST_HERDR_STATE;
-    else process.env.CMUX3D_TEST_HERDR_STATE = previousState;
+    if (previousSocket === undefined) delete process.env.CODING_CUBE_TEST_HERDR_SOCKET;
+    else process.env.CODING_CUBE_TEST_HERDR_SOCKET = previousSocket;
+    if (previousState === undefined) delete process.env.CODING_CUBE_TEST_HERDR_STATE;
+    else process.env.CODING_CUBE_TEST_HERDR_STATE = previousState;
     await rm(directory, { recursive: true, force: true });
   }
 }
@@ -833,7 +867,7 @@ function openPty(wsBase, face, slot) {
 
 function sizeFrame(cols, rows) {
   const frame = Buffer.allocUnsafe(8);
-  frame.write('CMUX', 0, 'ascii');
+  frame.write('CUBE', 0, 'ascii');
   frame.writeUInt16BE(cols, 4);
   frame.writeUInt16BE(rows, 6);
   return frame;

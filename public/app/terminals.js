@@ -253,7 +253,7 @@ export class TerminalFleet {
   #sendSize(entry) {
     if (entry.ws?.readyState !== WebSocket.OPEN) return;
     const size = new DataView(new ArrayBuffer(8));
-    size.setUint32(0, 0x434d5558); // CMUX
+    size.setUint32(0, 0x43554245); // CUBE
     size.setUint16(4, entry.term.cols);
     size.setUint16(6, entry.term.rows);
     entry.ws.send(size.buffer);

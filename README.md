@@ -1,4 +1,4 @@
-# CMUX3D
+# Coding Cube
 
 A rotatable workspace for six shells. It runs with ordinary local shells out of the box and can attach each face to a tab in a persistent Herdr `Coding Cube` workspace.
 
@@ -11,20 +11,20 @@ npm start
 
 `npm start` opens <https://codingcube.codyh.xyz> with a pairing code. Click a face and type: each face starts an ordinary shell in the current directory. Terminals and files remain on the computer running `npm start`. If the hosted page cannot connect, open <http://127.0.0.1:8064/>.
 
-The pairing code is stored in `~/.cmux3d/token`, so devices you have paired stay paired across restarts. Rotate it with `npm start -- --rotate-token`.
+The pairing code is stored in `~/.coding-cube/token`, so devices you have paired stay paired across restarts. Rotate it with `npm start -- --rotate-token`.
 
 To use another working directory or a local-only custom port:
 
 ```bash
-CMUX3D_WORKDIR="$PWD" npm start
-PORT=8070 CMUX3D_OPEN=0 npm start
+CODING_CUBE_WORKDIR="$PWD" npm start
+PORT=8070 CODING_CUBE_OPEN=0 npm start
 ```
 
 To use persistent Herdr terminals instead of disposable shells:
 
 ```bash
-CMUX3D_HERDR=herdr npm start
-CMUX3D_HERDR=herdr CMUX3D_WORKSPACE="My Cube" npm start
+CODING_CUBE_HERDR=herdr npm start
+CODING_CUBE_HERDR=herdr CODING_CUBE_WORKSPACE="My Cube" npm start
 ```
 
 Herdr mode idempotently creates the workspace and its `Face 1` through `Face 6`
@@ -57,17 +57,17 @@ To reach terminals through the hosted cube, use Tailscale Serve. The gateway
 stays on loopback while Tailscale provides TLS and authenticated identity:
 
 ```bash
-CMUX3D_TAILSCALE=serve \
-CMUX3D_TAILSCALE_USERS="you@example.com" \
-CMUX3D_GATEWAY_ONLY=1 \
-CMUX3D_HERDR=herdr npm start
+CODING_CUBE_TAILSCALE=serve \
+CODING_CUBE_TAILSCALE_USERS="you@example.com" \
+CODING_CUBE_GATEWAY_ONLY=1 \
+CODING_CUBE_HERDR=herdr npm start
 ```
 
-`CMUX3D_GATEWAY_ONLY=1` keeps the visual app on the hosted site; that process
+`CODING_CUBE_GATEWAY_ONLY=1` keeps the visual app on the hosted site; that process
 serves only health, Herdr state, events, and terminal WebSockets.
 
 The hosted cube can then connect without a pairing prompt on devices signed into
-that tailnet. `CMUX3D_TAILSCALE_USERS` is an optional comma-separated allowlist;
+that tailnet. `CODING_CUBE_TAILSCALE_USERS` is an optional comma-separated allowlist;
 a request outside it can still use the ordinary pairing-code path. Serve strips
 spoofed identity headers before forwarding requests to the loopback gateway.
 

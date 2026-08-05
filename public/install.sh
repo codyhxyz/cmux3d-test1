@@ -1,11 +1,11 @@
 #!/bin/sh
-# CMUX3D installer — curl -fsSL https://codingcube.codyh.xyz/install.sh | sh
-# Downloads the cube into ~/.cmux3d/app and starts it. No sudo, nothing global.
+# Coding Cube installer — curl -fsSL https://codingcube.codyh.xyz/install.sh | sh
+# Downloads the cube into ~/.coding-cube/app and starts it. No sudo, nothing global.
 set -eu
 
-REPO="${CMUX3D_REPO:-codyhxyz/cmux3d-test1}"
-BRANCH="${CMUX3D_BRANCH:-main}"
-HOME_DIR="${CMUX3D_HOME:-$HOME/.cmux3d}"
+REPO="${CODING_CUBE_REPO:-codyhxyz/coding-cube}"
+BRANCH="${CODING_CUBE_BRANCH:-main}"
+HOME_DIR="${CODING_CUBE_HOME:-$HOME/.coding-cube}"
 APP_DIR="$HOME_DIR/app"
 
 say() { printf '\033[36m›\033[0m %s\n' "$1"; }
@@ -26,7 +26,7 @@ curl -fsSL "$TARBALL" | tar -xz -C "$TMP" || die "Could not download $REPO@$BRAN
 SRC=$(find "$TMP" -maxdepth 1 -mindepth 1 -type d | head -1)
 [ -n "$SRC" ] || die "Downloaded archive looked empty"
 
-# Replace the app but keep ~/.cmux3d/token so paired devices stay paired.
+# Replace the app but keep ~/.coding-cube/token so paired devices stay paired.
 rm -rf "$APP_DIR"
 mv "$SRC" "$APP_DIR"
 
@@ -36,11 +36,11 @@ say "Installing dependencies (this builds a native terminal, give it a minute)�
 
 # A tiny launcher so restarting later is one word.
 mkdir -p "$HOME_DIR/bin"
-cat > "$HOME_DIR/bin/cmux3d" <<LAUNCHER
+cat > "$HOME_DIR/bin/coding-cube" <<LAUNCHER
 #!/bin/sh
 exec node "$APP_DIR/src/server/index.js" "\$@"
 LAUNCHER
-chmod +x "$HOME_DIR/bin/cmux3d"
+chmod +x "$HOME_DIR/bin/coding-cube"
 
 say "Starting your shells…"
 printf '\n'

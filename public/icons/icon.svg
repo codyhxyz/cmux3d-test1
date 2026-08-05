@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="CMUX3D">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Coding Cube">
   <rect width="512" height="512" rx="112" fill="#0b0e12"/>
   <g fill="none" stroke="#7aa2f7" stroke-width="18" stroke-linejoin="round">
     <path d="M256 108 400 190v132l-144 82-144-82V190z"/>

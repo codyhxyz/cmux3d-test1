@@ -52,7 +52,7 @@ export function createStaticResponder(publicRoot, readHerdrState, watchHerdrStat
       return;
     }
     if (requestUrl.pathname === '/health') {
-      sendJson(res, 200, { ok: true, service: 'cmux3d' });
+      sendJson(res, 200, { ok: true, service: 'coding-cube' });
       return;
     }
 
@@ -62,7 +62,7 @@ export function createStaticResponder(publicRoot, readHerdrState, watchHerdrStat
       // that is same-origin or has already proved it holds the code.
       const shareToken = Boolean(exposure?.active) && trustedForSecrets(req, requestUrl, { token });
       sendJson(res, 200, {
-        service: 'cmux3d',
+        service: 'coding-cube',
         webOrigin,
         exposed: Boolean(exposure?.active),
         tsOrigin: exposure?.tsOrigin || null,

@@ -6,7 +6,7 @@ p1_count: 3
 timestamp: 2026-07-20T21-30-24Z
 slug: public-index-html
 ---
-# CMUX3D connection gate critique
+# Coding Cube connection gate critique
 
 ## Design Health Score
 
@@ -30,7 +30,7 @@ slug: public-index-html
 
 **Deterministic scan:** 0 findings in `public/index.html`. The detector correctly found no banned visual scaffold; it cannot detect the contradictory workflow or unclear hierarchy.
 
-**Visual evidence:** Headless Chrome captured the deployed page at 1440×1000. The screenshot and five bound callouts are on the tldraw page **CMUX3D gate critique**.
+**Visual evidence:** Headless Chrome captured the deployed page at 1440×1000. The screenshot and five bound callouts are on the tldraw page **Coding Cube gate critique**.
 
 ## Overall Impression
 
@@ -45,7 +45,7 @@ The security boundary is legitimate and the dialog implementation is restrained.
 ## Priority Issues
 
 ### [P1] The primary action contradicts the instruction
-**Why it matters:** “Connect companion” implies the page can perform the missing launch; the next line admits the user must start CMUX3D elsewhere.
+**Why it matters:** “Connect companion” implies the page can perform the missing launch; the next line admits the user must start Coding Cube elsewhere.
 **Fix:** Make the CTA match the detected state: launch/open, retry, or connected—not a generic connect action.
 **Suggested command:** `$impeccable clarify`
 

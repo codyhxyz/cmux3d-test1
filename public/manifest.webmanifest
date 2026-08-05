@@ -1,6 +1,6 @@
 {
-  "name": "CMUX3D — Six shells, one workspace",
-  "short_name": "CMUX3D",
+  "name": "Coding Cube — Six shells, one workspace",
+  "short_name": "Coding Cube",
   "description": "Six real shells on a rotatable cube, paired with a computer you own.",
   "start_url": "/",
   "display": "standalone",

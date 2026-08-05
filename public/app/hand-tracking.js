@@ -263,7 +263,7 @@ export function createHandTracking({ video, onInput, onStatus = () => {}, onFeed
       handleActivity();
       return true;
     } catch (error) {
-      console.warn('[cmux3d] hand tracking unavailable:', error);
+      console.warn('[coding-cube] hand tracking unavailable:', error);
       disable(error?.message || String(error));
       return false;
     }
@@ -440,7 +440,7 @@ export function createHandTracking({ video, onInput, onStatus = () => {}, onFeed
         worker.postMessage({ type: 'frame', frame: bitmap, timestamp, generation: currentGeneration }, [bitmap]);
       }).catch((error) => {
         workerBusy = false;
-        console.warn('[cmux3d] camera frame unavailable:', error);
+        console.warn('[coding-cube] camera frame unavailable:', error);
       });
     }
     schedule();

@@ -133,7 +133,6 @@ body.is-dragging { cursor: grabbing; }
 .brand {
   display: flex;
   align-items: baseline;
-  gap: 10px;
   color: var(--ink);
   text-decoration: none;
   pointer-events: auto;
@@ -144,12 +143,6 @@ body.is-dragging { cursor: grabbing; }
   letter-spacing: 0.09em;
 }
 .brand strong span { color: var(--accent); }
-.brand small {
-  padding-left: 10px;
-  border-left: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 0.7rem;
-}
 
 .settings-button,
 .settings-panel button {

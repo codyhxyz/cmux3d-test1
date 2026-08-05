@@ -7,7 +7,7 @@ const FACE_MIN = 0;
 const FACE_MAX = 5;
 const SLOT_MIN = 0;
 const SLOT_MAX = 3;
-const RESIZE_MAGIC = Buffer.from('CMUX');
+const RESIZE_MAGIC = Buffer.from('CUBE');
 const HISTORY_LIMIT = 1_000_000;
 
 export class TerminalGrid {
@@ -113,9 +113,9 @@ export class TerminalGrid {
       ...process.env,
       TERM: 'xterm-256color',
       COLORTERM: 'truecolor',
-      CMUX3D_FACE: String(face),
-      CMUX3D_SLOT: String(slot),
-      CMUX3D_SESSION: id,
+      CODING_CUBE_FACE: String(face),
+      CODING_CUBE_SLOT: String(slot),
+      CODING_CUBE_SESSION: id,
     };
     for (const key of ['HERDR_ENV', 'HERDR_SOCKET_PATH', 'HERDR_PANE_ID', 'HERDR_TAB_ID']) delete env[key];
 

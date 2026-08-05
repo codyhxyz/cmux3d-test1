@@ -51,7 +51,7 @@ const shader = startShader(document.getElementById('shader-field'));
 let herdrEvents;
 let herdrRefreshing = false;
 let herdrRefreshQueued = false;
-const HANDOFF_KEY = 'cmux3d.handoff';
+const HANDOFF_KEY = 'coding-cube.handoff';
 // A bounce-back this fast means the host never answered. Declared here because
 // connectHost() runs while this module is still evaluating.
 const HANDOFF_WINDOW_MS = 12_000;

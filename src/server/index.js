@@ -6,7 +6,7 @@ import { createTailnetIdentity, offerServe, tailnetAddress } from './tailscale.j
 
 const options = readServerOptions();
 const useTailnet = options.expose || options.serveOnly;
-const tailnet = useTailnet && process.env.CMUX3D_LOCAL_ONLY !== '1' ? await tailnetAddress() : null;
+const tailnet = useTailnet && process.env.CODING_CUBE_LOCAL_ONLY !== '1' ? await tailnetAddress() : null;
 const peers = tailnet && options.trustTailnet
   ? createTailnetIdentity({ allowedLogins: options.tailscaleUsers })
   : null;
@@ -18,7 +18,7 @@ const runtime = createRuntime({
 });
 
 runtime.start().then(({ host, port }) => {
-  console.log(`cmux3d is listening at http://${host}:${port}/`);
+  console.log(`coding-cube is listening at http://${host}:${port}/`);
   if (options.rotated) console.log('pairing code rotated; paired phones must pair again');
 
   if (options.expose && tailnet) {
@@ -36,12 +36,12 @@ runtime.start().then(({ host, port }) => {
   // stays on loopback and lets Tailscale Serve authenticate every request.
   if (tailnet) upgradeToTls(port);
 
-  if (process.env.CMUX3D_OPEN === '0') return;
+  if (process.env.CODING_CUBE_OPEN === '0') return;
   const webUrl = pairingUrl(options.webOrigin, `http://127.0.0.1:${port}`, options.token);
   if (process.platform === 'darwin') execFile('open', [webUrl]);
   else console.log(`open ${webUrl}`);
 }).catch((error) => {
-  console.error(`cmux3d failed to start: ${error.message}`);
+  console.error(`coding-cube failed to start: ${error.message}`);
   process.exitCode = 1;
 });
 

@@ -6,7 +6,7 @@ import path from 'node:path';
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{16,}$/;
 
 export function stateDir(env = process.env) {
-  return env.CMUX3D_STATE_DIR || path.join(env.HOME || os.homedir(), '.cmux3d');
+  return env.CODING_CUBE_STATE_DIR || path.join(env.HOME || os.homedir(), '.coding-cube');
 }
 
 // Pairing survives restarts so a phone stays paired; the file is the only secret on disk.

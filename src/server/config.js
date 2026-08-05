@@ -13,24 +13,24 @@ export const paths = Object.freeze({
 });
 
 export function readServerOptions(env = process.env, argv = process.argv) {
-  const rotate = env.CMUX3D_ROTATE_TOKEN === '1' || argv.includes('--rotate-token');
+  const rotate = env.CODING_CUBE_ROTATE_TOKEN === '1' || argv.includes('--rotate-token');
   return {
     host: env.HOST || DEFAULT_HOST_ADDRESS,
     port: Number(env.PORT || DEFAULT_HOST_PORT),
-    cwd: env.CMUX3D_WORKDIR || process.cwd(),
-    shell: env.CMUX3D_SHELL || env.SHELL,
-    herdr: !env.CMUX3D_HERDR || env.CMUX3D_HERDR === '0' ? null : env.CMUX3D_HERDR,
-    workspace: env.CMUX3D_WORKSPACE || DEFAULT_WORKSPACE,
-    webOrigin: env.CMUX3D_WEB_ORIGIN || DEFAULT_WEB_ORIGIN,
-    gatewayOnly: env.CMUX3D_GATEWAY_ONLY === '1',
+    cwd: env.CODING_CUBE_WORKDIR || process.cwd(),
+    shell: env.CODING_CUBE_SHELL || env.SHELL,
+    herdr: !env.CODING_CUBE_HERDR || env.CODING_CUBE_HERDR === '0' ? null : env.CODING_CUBE_HERDR,
+    workspace: env.CODING_CUBE_WORKSPACE || DEFAULT_WORKSPACE,
+    webOrigin: env.CODING_CUBE_WEB_ORIGIN || DEFAULT_WEB_ORIGIN,
+    gatewayOnly: env.CODING_CUBE_GATEWAY_ONLY === '1',
     // The env override is honoured but never written to disk.
-    token: env.CMUX3D_TOKEN || (rotate ? rotateToken(env) : loadOrCreateToken(env)),
-    rotated: rotate && !env.CMUX3D_TOKEN,
-    expose: env.CMUX3D_TAILSCALE === '1' || argv.includes('--expose'),
-    serveOnly: env.CMUX3D_TAILSCALE === 'serve',
-    tailscaleUsers: String(env.CMUX3D_TAILSCALE_USERS || '').split(',').map((login) => login.trim()).filter(Boolean),
+    token: env.CODING_CUBE_TOKEN || (rotate ? rotateToken(env) : loadOrCreateToken(env)),
+    rotated: rotate && !env.CODING_CUBE_TOKEN,
+    expose: env.CODING_CUBE_TAILSCALE === '1' || argv.includes('--expose'),
+    serveOnly: env.CODING_CUBE_TAILSCALE === 'serve',
+    tailscaleUsers: String(env.CODING_CUBE_TAILSCALE_USERS || '').split(',').map((login) => login.trim()).filter(Boolean),
     // Tailscale authenticates your devices already; asking them for a code too
-    // buys nothing. CMUX3D_REQUIRE_CODE=1 demands one anyway.
-    trustTailnet: env.CMUX3D_REQUIRE_CODE !== '1',
+    // buys nothing. CODING_CUBE_REQUIRE_CODE=1 demands one anyway.
+    trustTailnet: env.CODING_CUBE_REQUIRE_CODE !== '1',
   };
 }
