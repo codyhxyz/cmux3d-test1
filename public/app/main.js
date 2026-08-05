@@ -294,9 +294,9 @@ function setConnectionState(state) {
   connectStatusLabel.textContent = labels[state];
   statusBanner.hidden = state !== 'unpaired';
   lostBanner.hidden = state !== 'lost';
-  rig.querySelectorAll('[data-agent-status]').forEach((status) => {
-    status.textContent = state === 'connected' ? 'unknown' : 'local';
-  });
+  // Only Herdr has a real agent status to report. With ordinary shells there is
+  // nothing to say, and saying "unknown" on every face is noise.
+  if (state !== 'connected') rig.querySelectorAll('[data-agent-status]').forEach((status) => { status.textContent = ''; });
   renderSavedHosts();
 }
 
@@ -457,7 +457,7 @@ function renderFaces() {
     panel.setAttribute('aria-label', `${facet.name} terminal`);
     panel.querySelector('header').innerHTML = `
       <span><i></i><strong>${facet.name}</strong><small data-session-label>${facet.code}</small></span>
-      <b data-agent-status>unknown</b>
+      <b data-agent-status></b>
     `;
   }
 }
