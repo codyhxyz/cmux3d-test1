@@ -142,110 +142,110 @@ The interface should explain that model credentials live inside the user's works
 
 | Option | Uses AWS credits | Scale-to-zero model | Persistence | Fit |
 | --- | --- | --- | --- | --- |
-| **Coder Community** | Yes | Stops workspace compute; Terraform controls what persists | Official AWS template stops EC2 and retains its disk | Best AWS-first control-plane candidate |
-| **Cloudflare Sandbox SDK** | No | Containers sleep automatically; billed in 10ms increments | Ephemeral disk plus explicit R2 backups/restores | Best speed/UX benchmark |
-| **Daytona** | Possibly through BYOC | Auto-stop, pause, archive, and delete | Snapshots; stopped/paused/archived states | Best managed sandbox candidate; BYOC terms need confirmation |
-| **DevPod** | Yes | Provider-specific automatic shutdown | Provider-specific | Excellent client tool, not a multi-user service control plane |
-| **E2B self-hosted** | Yes, beta | Firecracker sandbox fleet | Snapshots | Too operationally heavy for the first version |
-| **Direct ECS Fargate** | Yes | Run a task only while active | EFS or explicit object-storage restore | Viable fallback, but would require building the missing control plane |
+| **Amazon Bedrock AgentCore Runtime** | Yes | Dedicated microVM sessions stop automatically after configurable idle time | Per-session managed storage or customer-managed EFS/S3 Files | Best first candidate; purpose-built for this exact workload |
+| **Cloudflare Sandbox SDK** | No | Containers sleep automatically; billed in 10ms increments | Ephemeral disk plus explicit R2 backups/restores | Best independent benchmark |
+| **Daytona** | Possibly through BYOC | Auto-stop, pause, archive, and delete | Snapshots; stopped/paused/archived states | Strong managed option; BYOC terms need confirmation |
+| **Coder Community** | Yes | Stops workspace compute through Terraform | Official AWS template stops EC2 and retains its disk | Useful fallback for conventional long-lived dev machines |
+| **Direct ECS Fargate** | Yes | Runs tasks only while active | EFS or object-storage restore | Lower-level fallback only |
 
-## Coder
+## Amazon Bedrock AgentCore Runtime
 
-Coder is an AGPL-3.0 self-hosted cloud-development control plane with users, templates, APIs, Terraform provisioners, workspace lifecycle, secure agent networking, browser terminals, and generic `coder_app` reverse proxies. Its Community tier currently advertises unlimited workspaces, templates, and members in one organization plus OIDC.
+AgentCore Runtime is now the strongest AWS-native fit. It runs each user session in a dedicated isolated microVM, accepts a custom container image, supports OAuth or IAM at the boundary, bills actual CPU and peak memory per second, and automatically terminates idle compute. The same session ID starts fresh compute again when the user returns.
 
-The official AWS Linux template already models the laptop behavior: `aws_ec2_instance_state` switches the EC2 instance between `running` and `stopped`. AWS does not bill stopped instance compute, although EBS storage remains billed. Coder templates can also destroy ephemeral compute while retaining a separate persistent resource.
+Its interactive shell API is unusually close to Coding Cube's requirements:
 
-A Coding Cube gateway can run as a `coder_app`, allowing Coder's authenticated agent tunnel to proxy its loopback HTTP and WebSocket traffic. That could replace our custom Tailscale/pairing path for managed users while retaining Tailscale for self-hosted users.
+- WebSocket terminal sessions
+- Up to 10 concurrent shells per runtime, enough for all six faces
+- Reconnection using the same session and shell IDs
+- Up to 256KB of replayed output after reconnect
+- Configurable idle timeout from 60 seconds to 8 hours
+- Eight-hour maximum microVM lifetime followed by transparent reprovisioning
+- Explicit busy health reporting so a working agent can prevent idle termination
 
-**Known caveat:** some enforced inactivity and governance features are Premium. Confirm exactly which activity-based shutdown controls are available under Community and whether offering a hosted service under the AGPL license fits the intended business before committing.
+Managed session storage persists a private workspace across stop/resume and currently expires after 14 idle days. It is still Preview. Stable alternatives are EFS or S3 Files mounts, but their access-point isolation must be designed carefully. AgentCore does not map users to session IDs or impose per-user quotas; a small authenticated control API still owns that relationship.
+
+At current public pricing, Runtime charges $0.0895 per consumed vCPU-hour and $0.00945 per GB-hour of peak memory, measured per second with a one-second minimum. CPU waiting on model or network I/O is not charged when no background process is using it. AWS credits apply.
 
 ## Cloudflare Sandbox SDK
 
-Cloudflare now supplies much of the exact runtime surface: isolated containers, configurable automatic sleep, Worker-controlled lifecycle, shell sessions, browser terminal WebSockets, and point-in-time directory backups to R2. Container cold starts are documented as commonly 1–3 seconds.
+Cloudflare supplies a similar runtime surface: isolated containers, automatic sleep, shell sessions, browser terminal WebSockets, and point-in-time directory backups to R2. Documented cold starts are commonly 1–3 seconds, and billing stops after sleep.
 
-Containers are billed every 10ms while running and stop billing after sleep. The Workers Paid plan includes an initial memory, CPU, and disk allowance. The tradeoff is that container disk is ephemeral after sleep, so Coding Cube must create and restore backups rather than assuming a durable local disk.
-
-This is likely the smallest polished product implementation, but it does not consume AWS credits.
+It remains the best comparison if AgentCore's container, storage, or terminal contract blocks Herdr. It should not be adopted merely because its API looks convenient before testing the AWS primitive that consumes existing credits.
 
 ## Daytona
 
-Daytona exposes sub-90ms container sandbox creation, PTYs, snapshots, warm pools, auto-stop, VM pause/resume, archive, and per-second billing. Archived container sandboxes are documented as consuming no reserved-resource billing. Its BYOC feature runs custom regions on the customer's Kubernetes infrastructure through Helm charts.
+Daytona exposes sub-90ms sandbox creation, PTYs, snapshots, warm pools, auto-stop, VM pause/resume, archive, and per-second billing. Its BYOC model deploys custom regions to Kubernetes through Helm and appears to require a commercial relationship. Request terms only if both AgentCore and Cloudflare fail the compatibility spike.
 
-It is a strong match, but the current public repository is not a straightforward self-hostable control plane and BYOC appears to require a commercial relationship. Request BYOC pricing and licensing before designing around it. Daytona also advertises separate startup credits, which may make its hosted service cheaper than spending engineering time merely to use AWS credits.
+## Coder
+
+Coder remains a good conventional cloud-development control plane, but it solves a broader problem than Coding Cube currently needs. Its official AWS template stops persistent EC2 instances, which removes compute charges but leaves slower VM wake-up and EBS storage per user. Some enforced idle controls are Premium. Use Coder if users ultimately need durable general-purpose machines rather than serverless agent sessions.
 
 ## Rejected for now
 
-- **DevPod:** intentionally client-only; it does not solve hosted identity, quotas, or multi-user orchestration.
-- **E2B self-hosting:** AWS support is beta and its documented stack includes Nomad, Firecracker artifacts, Cloudflare configuration, and large nested-virtualization workers such as `m8i.4xlarge`. This recreates an infrastructure team.
-- **Raw Kubernetes/Karpenter:** powerful but adds a cluster, operators, storage policy, networking, and user isolation before proving the product.
-- **Custom ECS control plane:** Fargate's per-second billing and one-minute minimum are attractive, but auth, lifecycle, activity detection, persistence, terminal proxying, quotas, and repair would all become our code.
+- **DevPod:** client-only; no hosted identity or multi-user orchestration.
+- **E2B self-hosting:** beta AWS support plus Nomad, Firecracker artifacts, and large nested-virtualization workers.
+- **Raw Kubernetes/Karpenter:** a cluster and operator stack before product fit.
+- **Custom ECS control plane:** Fargate compute is suitable, but lifecycle, terminal routing, identity, quotas, and repair would become our code.
 
 # Recommended Path
 
 ## Decision
 
-Do not build a bespoke multi-user provisioner yet. Run two compatibility spikes behind the same Coding Cube UI contract:
+Test **AgentCore Runtime first**. It is the modern AWS primitive we were looking for and makes a Coder deployment unnecessary unless the test finds a hard blocker.
 
-1. **AWS/Coder spike:** Coder Community plus its official AWS lifecycle and Coding Cube as a `coder_app`.
-2. **Fast-sandbox spike:** Cloudflare Sandbox SDK; optionally Daytona if BYOC/commercial terms are favorable.
+Only benchmark Cloudflare Sandbox if AgentCore fails on wake latency, Herdr restoration, interactive terminal fidelity, container restrictions, or storage safety. Keep Daytona and Coder as fallbacks rather than parallel integrations.
 
-Choose from measured wake time, reliable Herdr restoration, true idle cost, licensing, and implementation size—not from cloud credits alone.
+## AgentCore lifecycle
 
-## AWS-first lifecycle
+1. **Active:** one isolated microVM serves the user's Coding Cube session.
+2. **Idle:** the microVM remains briefly warm; memory is still billed but unused CPU is not.
+3. **Stopped:** idle timeout ends the microVM; the session ID and mounted files remain.
+4. **Resuming:** the next request creates fresh compute and restarts Herdr from persistent state.
+5. **Expired/disposable:** retention deletes session storage and its user mapping.
 
-Use four resource states:
+The first spike should use a short idle timeout so the complete sleep/resume cycle can be tested repeatedly. Production can begin around 10 minutes, with Herdr reporting busy while any agent is working.
 
-1. **Running:** EC2 or Fargate compute is billed; Herdr and agents run.
-2. **Sleeping:** compute is stopped; a small persistent disk remains. Selecting the workspace starts it.
-3. **Archived:** idle long enough that only a compressed snapshot/object backup remains.
-4. **Disposable:** quick-task data is deleted after its retention window.
+## AgentCore spike acceptance criteria
 
-A stopped EC2 instance has no instance compute charge. A 10GB gp3 workspace disk is roughly a small sub-dollar monthly storage cost in common US regions, rather than the approximately $25–35/month cost of an always-running `t4g.medium`. Archiving long-idle workspaces reduces even that storage floor.
-
-Suggested defaults for the spike:
-
-- Sleep after 10 minutes with no terminal connection **and** no working agent.
-- Archive after 7 days asleep.
-- Delete disposable sessions after 24 hours.
-- Never sleep merely because the browser closed while an agent remains working.
-
-These are reversible product defaults, not final policy.
-
-## Coder spike acceptance criteria
-
-- A user signs in through standard OIDC.
-- Creating a workspace provisions one isolated AWS resource.
-- No workspace has a public inbound port.
-- Coder proxies the loopback Coding Cube gateway, including terminal WebSockets.
-- A sleeping workspace incurs no EC2 compute charge.
-- Selecting it wakes and reconnects without an address or pairing code.
-- Herdr restores all six faces and resumes a real Claude/Pi session.
-- A working agent prevents automatic sleep.
-- Deleting a workspace removes compute, storage, credentials, and proxy routes.
-- Wake, sleep, and restore durations are recorded rather than guessed.
+- Deploy the existing Node, Herdr, Claude, and Pi stack in a custom AgentCore container.
+- Use one runtime session and six concurrent interactive shells.
+- Run real commands and one real Claude/Pi session through Coding Cube.
+- Persist the repository and Herdr session across forced runtime stop/resume.
+- Confirm a working agent's busy health prevents idle shutdown.
+- Reconnect all six faces without copied addresses or pairing codes.
+- Measure cold wake time, shell replay, storage behavior, and actual AWS cost.
+- Prove two session IDs cannot read each other's files or shells.
+- Identify a non-Preview persistence path before production, or explicitly accept Preview risk for an alpha.
 
 # Delivery Order
 
-1. Build the frontend lifecycle states with fake data behind the Computers panel.
-2. Define a tiny provider-neutral UI contract: list, create, wake, sleep, restart, delete, and state events.
-3. Run Coder and Cloudflare/Daytona spikes against that contract.
-4. Select one backend and replace the fake adapter.
-5. Add quotas, retention controls, and operational recovery only after real usage.
-6. Add teams, sharing, billing, multiple regions, and machine-size choices only when demanded.
+1. Run the smallest AgentCore compatibility spike; do not build a product control plane.
+2. Record wake time, sleep behavior, shell fidelity, Herdr restoration, isolation, and cost.
+3. If it passes, define the tiny UI/API contract: list, create, wake, sleep, delete, and state events.
+4. Implement the frontend lifecycle states against fake data.
+5. Connect the UI to a minimal authenticated AgentCore session mapper.
+6. Benchmark Cloudflare only for any criterion AgentCore fails.
+7. Add quotas, teams, billing, regions, and machine choices only when real usage requires them.
 
 # Open Decisions
 
 - Is the default a persistent workspace or a disposable quick task?
 - Is 10 minutes the right idle threshold for conversational coding agents?
 - How long should archived workspaces be retained while credits remain generous?
-- Do Coder Community's license and lifecycle features cover a hosted public service?
-- Will model authentication use user-owned provider accounts, included Bedrock capacity, or both?
+- Is AgentCore managed session storage safe enough while it remains Preview, or should the alpha use per-user EFS/S3 Files access points?
+- Will model authentication use user-owned provider accounts, AgentCore Identity, included Bedrock capacity, or a combination?
 - Is preserving live process memory important, or is Herdr session restoration sufficient?
 
 # Sources
 
 Reviewed 2026-08-04:
 
+- [AgentCore Runtime overview](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html)
+- [AgentCore interactive shells](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-command-shell.html)
+- [AgentCore session lifecycle](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-sessions.html)
+- [AgentCore lifecycle configuration](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-lifecycle-settings.html)
+- [AgentCore filesystem configurations](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html)
+- [AgentCore pricing](https://aws.amazon.com/bedrock/agentcore/pricing/)
 - [Coder repository and overview](https://github.com/coder/coder)
 - [Coder workspace lifecycle](https://coder.com/docs/user-guides/workspace-lifecycle)
 - [Coder workspace scheduling](https://coder.com/docs/user-guides/workspace-scheduling)
