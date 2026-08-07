@@ -21,6 +21,7 @@ import { startShader } from './shader.js';
 import { momentumDuration, momentumSliderValue, SpaceController } from './space.js';
 import { TerminalFleet } from './terminals.js';
 import { createOriginTransport, createSessionId, createShellTransport } from './transport.js';
+import { createWorkspaceLifecycle, describeActivity, sleepPolicy } from './workspace.js';
 
 const rig = document.getElementById('rig');
 const viewport = document.getElementById('viewport');
@@ -46,8 +47,17 @@ const connectHostInput = document.getElementById('connect-host');
 const connectTokenInput = document.getElementById('connect-token');
 const connectMessage = document.getElementById('connect-message');
 const connectSaved = document.getElementById('host-list');
+const hostPolicy = document.getElementById('host-policy');
 const hostDirect = document.getElementById('host-direct');
 const hostQr = document.getElementById('host-qr');
+const wake = document.getElementById('wake');
+const wakeDot = wake.querySelector('i');
+const wakeLabel = document.getElementById('wake-label');
+const wakeDetail = document.getElementById('wake-detail');
+const wakeNote = document.getElementById('wake-note');
+const wakeElapsed = document.getElementById('wake-elapsed');
+const wakeAction = document.getElementById('wake-action');
+const workspaceLive = document.getElementById('workspace-live');
 const shader = startShader(document.getElementById('shader-field'));
 let herdrEvents;
 let herdrRefreshing = false;
@@ -62,6 +72,20 @@ const HANDOFF_WINDOW_MS = 12_000;
 const AGENTCORE_SESSION_KEY = 'coding-cube.agentcore.session';
 let connectionState = 'connecting';
 let connectAttempt = 0;
+// Set while a cloud transport exists: one /prepare call that re-reads state, phase and
+// busy-ness. Held here because the popover asks for it, not the transport.
+let refreshWorkspace = null;
+// A cancelled wake must stay cancelled through a tab switch, or returning to the page
+// silently restarts the machine the user just declined to wait for.
+let cloudCancelled = false;
+
+// Six terminals retrying and a workspace waking from sleep are the same picture. This
+// is the thing that tells them apart, and it must exist before the first transport is
+// built, because building one already has something to say.
+const lifecycle = createWorkspaceLifecycle({
+  onChange: renderLifecycle,
+  refresh: () => refreshWorkspace?.(),
+});
 
 function agentcoreSessionId() {
   try {
@@ -76,13 +100,38 @@ function agentcoreSessionId() {
   }
 }
 
+// The minter serves the Cube, so a page that came from one is already same-origin with
+// its API — which is the entire reason it serves it, since Chrome 151 refuses an https
+// page's fetch to loopback outright. Resolved once and cached: it depends only on
+// location.origin, which cannot change without a reload. The saved host's own address
+// stays the fallback for a page served by something that is not a minter.
+let cloudBase = null;
+async function resolveCloudBase(fallback) {
+  if (cloudBase) return cloudBase;
+  try {
+    const response = await fetch('/session', { signal: AbortSignal.timeout(5000) });
+    // Checked on the body, not the status: a static host that answers unknown paths
+    // with its index page would otherwise look like a minter.
+    const body = response.ok ? await response.json().catch(() => null) : null;
+    if (body?.runtimeArn) return (cloudBase = location.origin);
+  } catch {
+    // Not served by a minter. Fall through to whatever the saved host names.
+  }
+  return (cloudBase = fallback);
+}
+
 // A host is either an origin the browser can reach directly, or an AgentCore runtime
 // reached through a local minter. Everything else about the Cube is identical.
 function transportForHost(host = activeHost()) {
-  if (host.kind !== 'agentcore') return createOriginTransport(host);
-  const base = host.origin.replace(/\/+$/, '');
+  if (host.kind !== 'agentcore') {
+    refreshWorkspace = null;
+    lifecycle.update({ cloud: false });
+    return createOriginTransport(host);
+  }
+  const fallbackBase = host.origin.replace(/\/+$/, '');
   const sessionId = agentcoreSessionId();
   const ask = async (path) => {
+    const base = await resolveCloudBase(fallbackBase);
     const response = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(20_000) });
     const body = await response.json().catch(() => null);
     if (!response.ok) {
@@ -92,13 +141,33 @@ function transportForHost(host = activeHost()) {
     }
     return body;
   };
+  // Every wake goes through here, so this is where the interface learns that one is
+  // happening — before the first shell is minted, not after six of them have failed.
+  const prepare = async () => {
+    lifecycle.update({ preparing: true, error: null });
+    try {
+      const report = await ask(`/prepare?sessionId=${encodeURIComponent(sessionId)}`);
+      // `busy` is the container's own report of which panes hold a working agent. A
+      // minter that does not forward it leaves that unproven rather than assumed.
+      lifecycle.update({ preparing: false, everStarted: true, workspace: report, busy: report?.busy ?? null });
+      return report;
+    } catch (error) {
+      lifecycle.update({ preparing: false, error: { message: error.message, auth: error.code === 'AWS_LOGIN_REQUIRED' } });
+      throw error;
+    }
+  };
+  refreshWorkspace = () => prepare().catch(() => {
+    // The lifecycle already carries the failure; a rejected refresh has nothing to add.
+  });
+  lifecycle.update({ cloud: true, cancelled: false, error: null, workspace: null, busy: null, faces: 0 });
+
   return createShellTransport({
     name: host.name,
     sessionId,
     mintUrl: async (shellId) => (await ask(`/mint?shellId=${encodeURIComponent(shellId)}&sessionId=${encodeURIComponent(sessionId)}`)).url,
     // Also returns the face -> terminal_id map, from the same call that materialises
     // /mnt/workspace. The transport refuses to open a shell until it resolves.
-    ensureWorkspace: () => ask(`/prepare?sessionId=${encodeURIComponent(sessionId)}`),
+    ensureWorkspace: prepare,
   });
 }
 
@@ -106,6 +175,9 @@ const fleet = new TerminalFleet({
   slot: 0,
   transport: transportForHost(),
   onConnection(open) {
+    // How many of the six are actually live is what separates "Waking · Opening
+    // terminals…" from "Ready", and it costs no extra call to know.
+    lifecycle.update({ faces: open });
     // The health check on return reports background failures without stale UI.
     if (!isPageActive()) return;
     if (!open && connectionState === 'connected') setConnectionState('lost');
@@ -209,6 +281,9 @@ navigator.mediaDevices?.addEventListener('devicechange', refreshCameras);
 refreshCameras();
 onPageActivity((active) => {
   fleet.setWindowActive(active);
+  // A backgrounded tab is not asking for workspace details, and every refresh is an
+  // /invocations call that resets the idle timer it is reporting on.
+  if (!active) lifecycle.setDetailInterest(false);
   // Returning to the tab is the natural moment to re-check; no polling needed.
   // Always re-probe: the host may have gone away while we were backgrounded.
   if (active) connectHost();
@@ -216,6 +291,7 @@ onPageActivity((active) => {
 
 connectForm.addEventListener('submit', (event) => {
   event.preventDefault();
+  clearCancel();
   const host = switchHost(connectHostInput.value, { token: connectTokenInput.value.trim() });
   if (!host) {
     showMessage('That does not look like an address. Try something like mymac.tailnet.ts.net.');
@@ -247,12 +323,24 @@ document.getElementById('connect-paste').addEventListener('click', async () => {
   }
 });
 document.getElementById('retry-now').addEventListener('click', () => {
+  clearCancel();
+  fleet.retryNow();
+  connectHost();
+});
+wakeAction.addEventListener('click', () => {
+  if (lifecycle.state === 'waking') {
+    cancelWake();
+    return;
+  }
+  clearCancel();
   fleet.retryNow();
   connectHost();
 });
 // Opening the panel or taking the command is the signal that a host may be about
-// to appear; only then is it worth watching loopback.
+// to appear; only then is it worth watching loopback. It is also the moment the plan
+// allows a workspace to be asked how it is doing — see setDetailInterest.
 document.getElementById('connect-panel').addEventListener('toggle', (event) => {
+  lifecycle.setDetailInterest(event.newState === 'open' && connectionState === 'connected');
   if (event.newState === 'open') watchForHost();
 });
 document.getElementById('host-add').addEventListener('click', () => {
@@ -285,6 +373,8 @@ async function connectHost() {
     // The cloud's origin is a local minter, not a machine with a gateway on it, so the
     // loopback affordances below are about "this computer" specifically.
     const cloud = activeHost().kind === 'agentcore';
+    // A declined wake is a decision, not a transient failure; only clearCancel() undoes it.
+    if (cloud && cloudCancelled) return;
     if (!cloud && isLoopbackHost()) desktopShells.href = hostHttp('/');
     const plan = connectionPlan();
     if (plan.type === 'mixed-content') {
@@ -324,6 +414,7 @@ async function connectHost() {
     if (!probe.ok) throw new Error(probe.reason || 'unreachable');
 
     markConnected();
+    lifecycle.update({ error: null });
     setConnectionState('connected');
     showMessage('');
     fleet.attach();
@@ -335,7 +426,11 @@ async function connectHost() {
       herdrEvents.addEventListener('message', refreshHerdrState);
     }
     renderSavedHosts();
-    refreshPairingCode();
+    // The QR pairs a phone with this computer. A cloud host's origin is a minter that
+    // serves no /api/host/info, so asking it is a console error on every cloud connect
+    // and a question about the wrong machine either way.
+    if (cloud) hostQr.hidden = true;
+    else refreshPairingCode();
   } catch (error) {
     if (attempt !== connectAttempt) return;
     setConnectionState(wasConnected ? 'lost' : 'unpaired');
@@ -346,9 +441,11 @@ async function connectHost() {
     // both when the helper is absent and when it refuses to reach loopback at all.
     if (activeHost().kind === 'agentcore') {
       const unreachable = /failed to fetch|networkerror|load failed/i.test(error.message);
-      showMessage(unreachable
+      const message = unreachable
         ? 'The cloud runs from a helper on the computer that owns it, so it is not available in this browser.'
-        : `Cloud unavailable: ${error.message}`);
+        : `Cloud unavailable: ${error.message}`;
+      showMessage(message);
+      lifecycle.update({ error: { message, auth: /aws login/i.test(error.message) } });
     }
   }
 }
@@ -362,8 +459,8 @@ function setConnectionState(state) {
   document.body.classList.toggle('is-lost', state === 'lost');
   document.body.classList.toggle('is-connected', state === 'connected');
   connectStatusLabel.textContent = labels[state];
-  statusBanner.hidden = state !== 'unpaired';
-  lostBanner.hidden = state !== 'lost';
+  lifecycle.update({ cloud: host.kind === 'agentcore', connection: state });
+  updateBanners();
   // Only Herdr has a real agent status to report. With ordinary shells there is
   // nothing to say, and saying "unknown" on every face is noise.
   if (state !== 'connected') rig.querySelectorAll('[data-agent-status]').forEach((status) => { status.textContent = ''; });
@@ -372,6 +469,63 @@ function setConnectionState(state) {
 
 function showMessage(text) {
   connectMessage.textContent = text;
+}
+
+// Two surfaces narrating the same event end up contradicting each other. While the cube
+// is showing real lifecycle progress, the generic banners stand down.
+function updateBanners() {
+  const covered = !wake.hidden;
+  statusBanner.hidden = connectionState !== 'unpaired' || covered;
+  lostBanner.hidden = connectionState !== 'lost' || covered;
+}
+
+function renderLifecycle(snapshot, { stateChanged } = {}) {
+  // Progress belongs over the cube; Ready and Working need no surface of their own,
+  // because the terminals underneath are already the answer.
+  const showing = snapshot.state === 'waking' || snapshot.state === 'saving' || snapshot.state === 'attention';
+  wake.hidden = !showing;
+  if (showing) {
+    wakeDot.dataset.tone = snapshot.tone;
+    wakeLabel.textContent = snapshot.label;
+    wakeDetail.textContent = snapshot.detail;
+    wakeNote.textContent = snapshot.note || '';
+    wakeNote.hidden = !snapshot.note;
+    wakeElapsed.textContent = snapshot.elapsed ? `${snapshot.elapsed} elapsed` : '';
+    wakeElapsed.hidden = !snapshot.elapsed;
+    wakeAction.textContent = snapshot.action || '';
+    wakeAction.hidden = !snapshot.action;
+  }
+  updateBanners();
+  renderSavedHosts();
+  // The state, never the clock: a counter ticking into a live region would interrupt
+  // terminal input once a second, which is worse than saying nothing.
+  if (stateChanged && snapshot.state) {
+    workspaceLive.textContent = [snapshot.label, snapshot.detail, snapshot.note]
+      .filter(Boolean)
+      // Sentence boundaries are what a screen reader pauses on, and a detail that is
+      // already a sentence must not end up with two full stops.
+      .map((part) => (/[.!?…]$/.test(part) ? part : `${part}.`))
+      .join(' ');
+  }
+}
+
+// Cancel is real, and it is the only cancel that would not be a lie: nothing can
+// interrupt an AgentCore boot, but the six faces can stop retrying into a machine that
+// is not answering and hand the keyboard back to the local shells.
+function cancelWake() {
+  cloudCancelled = true;
+  fleet.detach();
+  lifecycle.update({ cancelled: true, preparing: false, faces: 0 });
+  setConnectionState('unpaired');
+  // Focus stays on the row that started this, per plan section 9.
+  document.getElementById('connect-status').focus();
+}
+
+// Only an explicit request overrides a cancelled wake; returning to the tab does not.
+function clearCancel() {
+  if (!cloudCancelled) return;
+  cloudCancelled = false;
+  lifecycle.update({ cancelled: false, error: null });
 }
 
 // Keep the click's user activation: browsers use it for the native Local Network
@@ -479,18 +633,29 @@ function renderSavedHosts() {
   });
   connectSaved.replaceChildren(...seen.map((host) => {
     const active = host.origin === current;
+    const cloud = host.kind === 'agentcore';
     const item = document.createElement('li');
     if (active) item.className = 'is-current';
 
     const use = document.createElement('button');
     use.type = 'button';
     use.setAttribute('aria-current', String(active));
-    // The cloud's origin is the local minter's port. Showing it would be both meaningless
-    // and wrong: it is not where the terminals are, and infrastructure is not the product.
-    const subtitle = host.kind === 'agentcore' ? 'sleeps when idle' : host.origin.replace(/^https?:\/\//, '');
-    use.innerHTML = `<i></i><span><strong>${host.name}</strong><small>${subtitle}</small></span>`
-      + `<em>${active ? connectionLabel() : lastSeen(host)}</em>`;
+    // A cloud workspace reports a lifecycle state; a computer you own reports where it
+    // is. The cloud's origin is the local minter's port — showing it would be both
+    // meaningless and wrong, because that is not where the terminals are.
+    const life = cloud && active ? lifecycle.snapshot() : null;
+    const subtitle = cloud
+      ? (life?.state ? `<b>${escapeHtml(life.label)}</b> · ${escapeHtml(life.detail)}` : 'sleeps when idle')
+      : host.origin.replace(/^https?:\/\//, '');
+    const activity = cloud
+      ? describeActivity({ cloud: true, connection: active ? connectionState : 'idle', lastConnected: host.lastConnected })
+      : (active ? connectionLabel() : lastSeen(host));
+    use.innerHTML = `<i${life?.tone ? ` data-tone="${life.tone}"` : ''}></i>`
+      + `<span><strong>${host.name}</strong><small>${subtitle}</small>`
+      + `${life?.note ? `<small class="host-note">${escapeHtml(life.note)}</small>` : ''}</span>`
+      + `<em>${activity}</em>`;
     use.addEventListener('click', () => {
+      clearCancel();
       if (active) {
         connectHost();
         return;
@@ -514,6 +679,17 @@ function renderSavedHosts() {
     }
     return item;
   }));
+  // Plan section 4: say the policy in plain language rather than leaving sleep to be
+  // discovered. No number, because the idle timeout lives in the runtime's
+  // lifecycleConfiguration and nothing reaches the browser to read it.
+  const cloudActive = activeHost().kind === 'agentcore';
+  hostPolicy.textContent = cloudActive ? sleepPolicy() : '';
+  hostPolicy.hidden = !cloudActive;
+}
+
+// Lifecycle text can carry a message from the minter, and the row is built as markup.
+function escapeHtml(text) {
+  return String(text ?? '').replace(/[&<>"]/g, (character) => `&#${character.charCodeAt(0)};`);
 }
 
 function connectionLabel() {

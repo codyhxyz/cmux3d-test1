@@ -10,6 +10,15 @@ import { HandController, handSample } from '../public/app/hand-tracking.js';
 import { herdrMetadata } from '../public/app/herdr.js';
 import { accessoryKeyInput, commandKeyInput, commandPromptDirection, ctrlCode, promptLine } from '../public/app/terminal-keys.js';
 import { DEFAULT_AGENTCORE_ORIGIN, mixedContentBlocked, normalizeHostOrigin, pairingUrl, parseFragment } from '../public/app/connection-config.js';
+import {
+  createWorkspaceLifecycle,
+  deriveWorkspaceState,
+  describeActivity,
+  formatElapsed,
+  sleepPolicy,
+  STUCK_AFTER_MS,
+  workingPanes,
+} from '../public/app/workspace.js';
 import qrcode from 'qrcode-generator';
 import {
   DAMPING,
@@ -102,6 +111,21 @@ await rm(tokenDir, { recursive: true, force: true });
 
 assert.equal(DEFAULT_AGENTCORE_ORIGIN, 'http://127.0.0.1:8787', 'the hosted cube should reach its cloud through the local minter without pairing');
 assert.doesNotMatch(await readFile('public/app/connection.js', 'utf8'), /tail47c266/, 'the always-on box AgentCore replaced must not come back as a second cloud');
+// `npm start` with CUBE_RUNTIME_ARN serves the Cube and the minter on one origin, so a
+// page it served must ask itself. Measured: without this the page on :8064 fetched
+// :8787 and Chrome refused it for CORS, silently against whichever runtime was there.
+assert.match(
+  await readFile('public/app/main.js', 'utf8'),
+  /resolveCloudBase[\s\S]{0,600}location\.origin/,
+  'a Cube served by the minter must mint from its own origin, not the standalone port',
+);
+// faces[].paneId is the join key the browser uses against busy.panes; a minter that
+// drops one half leaves "Agent working — sleep paused" permanently unreachable.
+assert.match(
+  await readFile('src/server/cloud/mint.js', 'utf8'),
+  /busy: json\?\.busy/,
+  '/prepare must forward the container busy block or the Working state can never fire',
+);
 assert.equal(normalizeHostOrigin('mymac.tailnet.ts.net'), 'https://mymac.tailnet.ts.net', 'a bare address needs TLS to be reachable from the hosted page');
 assert.equal(normalizeHostOrigin('127.0.0.1:8064'), 'http://127.0.0.1:8064', 'loopback stays plain http');
 assert.equal(normalizeHostOrigin('https://mymac.ts.net/'), 'https://mymac.ts.net', 'a pasted URL should reduce to its origin');
@@ -116,6 +140,122 @@ assert.equal(mixedContentBlocked('https:', 'http://mymac.ts.net:8064'), true, 'a
 assert.equal(mixedContentBlocked('https:', 'http://127.0.0.1:8064'), false, 'browsers exempt loopback from mixed content');
 assert.equal(mixedContentBlocked('http:', 'http://mymac.ts.net:8064'), false, 'a plain page can reach a plain host');
 assert.match(pairingUrl('https://cube.example', 'https://mymac.ts.net', 'abc'), /#host=https%3A%2F%2Fmymac\.ts\.net&token=abc$/, 'the printed pairing link should configure a phone in one step');
+
+// A workspace waking from sleep and a workspace that is broken produce the same picture
+// — six terminals retrying — unless something says which one is happening.
+assert.equal(deriveWorkspaceState({ connection: 'unpaired' }).state, null, 'a computer you own has no sleep cycle to report');
+const asleep = deriveWorkspaceState({ cloud: true, connection: 'unpaired' });
+assert.equal(asleep.state, 'sleeping', 'a cloud workspace that has never started is asleep, not broken');
+assert.equal(asleep.action, 'Wake', 'every lifecycle state must name a way out');
+
+const waking = deriveWorkspaceState({ cloud: true, preparing: true, workspace: { state: 'booting', phase: 'restore' } });
+assert.equal(waking.state, 'waking');
+assert.equal(waking.detail, 'Restoring files…', 'a wake should say which step is running rather than spin');
+assert.equal(waking.action, 'Cancel', 'a wake nobody can see the end of has to be refusable');
+assert.equal(
+  deriveWorkspaceState({ cloud: true, connection: 'connected', faces: 4, workspace: { state: 'ready' } }).detail,
+  'Opening terminals…',
+  'four of six faces attached is still waking, and saying Ready then would be a lie',
+);
+assert.equal(
+  deriveWorkspaceState({ cloud: true, preparing: true, elapsedMs: STUCK_AFTER_MS }).state,
+  'attention',
+  'a wake that never lands must stop calling itself Waking; cold start was measured at 1.3s',
+);
+assert.equal(deriveWorkspaceState({ cloud: true, workspace: { state: 'saving' } }).detail, 'Saving your workspace before sleep');
+assert.equal(
+  deriveWorkspaceState({ cloud: true, error: { message: 'AWS login required' } }).action,
+  'Reconnect',
+  'expired credentials need the provider named, not a retry loop',
+);
+
+const cubeFaces = [{ face: 0, label: 'Face 1', paneId: 'pane-a' }, { face: 1, label: 'Face 2', paneId: 'pane-b' }];
+const attached = { cloud: true, connection: 'connected', faces: 6, workspace: { state: 'ready', faces: cubeFaces } };
+assert.equal(deriveWorkspaceState(attached).state, 'ready');
+assert.equal(
+  deriveWorkspaceState({ ...attached, preparing: true }).state,
+  'ready',
+  'the detail refresh is an /invocations call on a live workspace; painting it as a wake made an open popover flap every 15s',
+);
+assert.equal(deriveWorkspaceState(attached).note, null, 'nothing may claim an agent is working without a pane saying so');
+const busyCube = deriveWorkspaceState({
+  ...attached,
+  busy: { busy: true, reason: 'pane', panes: { 'pane-a': { status: 'working', busy: true }, 'pane-b': { status: 'blocked' } } },
+});
+assert.equal(busyCube.state, 'working');
+assert.equal(busyCube.note, 'Agent working — sleep paused', 'the sleep guarantee is the promise users most need to trust');
+assert.match(busyCube.detail, /Face 1/, 'a working agent should be named by the face it is in');
+// agent_status is idle, working, blocked, done, unknown. `blocked` is an agent waiting on
+// a human, which is exactly when sleeping the microVM is correct.
+assert.equal(
+  workingPanes({ panes: { a: { status: 'blocked' }, b: { status: 'unknown' }, c: { status: 'idle' }, d: { status: 'done' } } }).length,
+  0,
+  'only `working` may pause sleep, or a cube with an idle agent never sleeps at all',
+);
+
+assert.equal(formatElapsed(4999), '0:04');
+assert.equal(formatElapsed(65_000), '1:05', 'elapsed time should read as a clock, not milliseconds');
+const activityNow = Date.parse('2026-08-04T12:00:00Z');
+assert.equal(describeActivity({ cloud: true, connection: 'connected' }), 'active now');
+assert.equal(describeActivity({ cloud: true, connection: 'unpaired' }), 'never started');
+assert.equal(describeActivity({ cloud: true, connection: 'unpaired', lastConnected: activityNow - 7_200_000, now: activityNow }), 'slept 2h ago');
+assert.equal(
+  describeActivity({ cloud: true, connection: 'unpaired', lastConnected: activityNow - 5_000, now: activityNow }),
+  'slept just now',
+  'a workspace that has only just stopped should not report "slept just now ago"',
+);
+assert.equal(sleepPolicy(600), 'Sleeps after 10 minutes with no terminal or agent activity.');
+assert.match(sleepPolicy(), /^Sleeps on its own/, 'an unknown idle timeout must not be reported as a number we cannot read');
+
+// The elapsed clock, on an injected one so the assertion is about behaviour and not timing.
+let lifecycleClock = 0;
+const lifecycleTicks = [];
+const lifecycleSeen = [];
+const lifecycleProbe = createWorkspaceLifecycle({
+  onChange: (snapshot, meta) => lifecycleSeen.push({ ...snapshot, ...meta }),
+  now: () => lifecycleClock,
+  schedule: (fn) => lifecycleTicks.push(fn),
+  cancel: () => {},
+});
+lifecycleProbe.update({ cloud: true, preparing: true });
+assert.equal(lifecycleSeen.at(-1).stateChanged, true, 'entering a state is what a screen reader should hear');
+assert.equal(lifecycleProbe.snapshot().elapsed, null, 'a two-second cold start needs no stopwatch');
+lifecycleClock += 5000;
+lifecycleTicks.at(-1)();
+assert.equal(lifecycleSeen.at(-1).elapsed, '0:05', 'past five seconds the wait must show how long it has been');
+assert.equal(lifecycleSeen.at(-1).stateChanged, false, 'the ticking clock must not re-announce itself over terminal input');
+lifecycleProbe.dispose();
+
+// The clock is an input, not decoration: a wake nothing ever finishes has to escalate on
+// its own, and must not reset that clock and flip straight back to Waking.
+let stuckClock = 0;
+const stuckTicks = [];
+const stuckProbe = createWorkspaceLifecycle({ now: () => stuckClock, schedule: (fn) => stuckTicks.push(fn), cancel: () => {} });
+stuckProbe.update({ cloud: true, preparing: true });
+assert.equal(stuckProbe.snapshot().state, 'waking');
+stuckClock += STUCK_AFTER_MS;
+stuckTicks.at(-1)();
+assert.equal(stuckProbe.snapshot().state, 'attention', 'a wake with no end in sight must stop calling itself Waking');
+assert.equal(stuckProbe.snapshot().elapsed, '1:30', 'the escalated state keeps the clock the wait earned');
+stuckClock += 2000;
+stuckTicks.at(-1)();
+assert.equal(stuckProbe.snapshot().state, 'attention', 'escalation must be stable, not a flip-flop once a tick resets it');
+stuckProbe.update({ preparing: false, connection: 'connected', faces: 6, workspace: { state: 'ready' } });
+assert.equal(stuckProbe.snapshot().state, 'ready', 'a wake that finally lands clears the escalation and the clock');
+assert.equal(stuckProbe.snapshot().elapsed, null);
+stuckProbe.dispose();
+
+// Refreshing costs an /invocations call, and an /invocations call resets the very idle
+// timer it reports on. It happens when the user asks for details, and not otherwise.
+let lifecycleRefreshes = 0;
+const gatedProbe = createWorkspaceLifecycle({ refresh: () => { lifecycleRefreshes += 1; }, schedule: () => 1, cancel: () => {} });
+gatedProbe.setDetailInterest(true);
+assert.equal(lifecycleRefreshes, 1, 'opening workspace details should ask once, immediately');
+gatedProbe.setDetailInterest(true);
+assert.equal(lifecycleRefreshes, 1, 'an already-open panel must not stack refresh loops on itself');
+gatedProbe.setDetailInterest(false);
+assert.equal(lifecycleRefreshes, 1, 'a closed panel must stop asking, or no workspace ever sleeps');
+gatedProbe.dispose();
 
 assert.deepEqual(
   parseStatus({
@@ -347,6 +487,11 @@ try {
   assert.match(homeSource, /id="desktop-shells" href="http:\/\/127\.0\.0\.1:8064\/"/, 'the desktop-shells action should open the local workspace');
   assert.match(homeSource, /viewport-fit=cover/, 'mobile layout should respect device safe areas');
   assert.doesNotMatch(homeSource, /<dialog|companion-gate/, 'a missing host must not block the cube with a menu');
+  assert.match(homeSource, /id="wake"[^>]*hidden/, 'wake progress belongs inside the cube, and starts out of the way');
+  assert.match(homeSource, /id="wake-elapsed"/, 'a wait with no elapsed time is the endless spinner the plan forbids');
+  assert.match(homeSource, /id="wake-action"/, 'a state with no recovery action is a dead end');
+  assert.match(homeSource, /id="workspace-live"[^>]*aria-live="polite"/, 'lifecycle changes must be announced without interrupting terminal input');
+  assert.match(homeSource, /id="host-policy"/, 'when a workspace sleeps should be stated, not discovered');
   assert.doesNotMatch(homeSource, /HerdR, Pi, terminals/, 'the connection UI should not explain internal architecture');
   assert.doesNotMatch(homeSource, /companion|Interactive preview/i, 'the product should speak of a computer you own, not a companion');
   assert.equal(homeSource.match(/class="hand-cursor"/g)?.length, 2, 'the UI should expose one marker per tracked hand');
@@ -362,6 +507,11 @@ try {
   assert.match(styles, /\(max-height: 520px\) and \(pointer: coarse\)/, 'short landscape phones should use the mobile controls');
   assert.match(styles, /\.hand-cursor\[data-state="ineligible"\]::after[^}]*content:\s*"Open fingers"/s, 'a rejected pinch should explain how to become eligible');
   assert.match(styles, /@media \(hover: hover\)/, 'hover states must not stick after a tap');
+  assert.match(styles, /\.wake \{[^}]*pointer-events: none/s, 'the progress surface must not swallow taps meant for the cube behind it');
+  assert.match(styles, /\.wake \{[^}]*width: min\(280px, calc\(100% - 32px\)\)/s, 'wake progress has to stay usable at 320px');
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\)[^@]*animation: none/s, 'a wake should become a state swap when motion is not wanted');
+  assert.match(styles, /\.host-list i\[data-tone="bad"\]/, 'a workspace row should carry its own state dot');
+  assert.match(styles, /\.host-list small b \{/, 'state is named in words, never encoded by the dot alone');
 
   // Deploys are invisible to returning visitors if the app can be cached without
   // revalidating, and these filenames carry no content hash.
@@ -406,6 +556,13 @@ try {
   assert.ok(handoffWindow > 0 && handoffWindow < mainSource.indexOf('connectHost();'), 'handoff constants must be initialised before the first connect');
   assert.doesNotMatch(mainSource, /companion|showModal/i, 'connection failure should never open a blocking gate');
   assert.doesNotMatch(mainSource, /setInterval/, 'HerdR state should not be polled');
+  assert.match(mainSource, /lifecycle\.update\(\{ faces: open \}\)/, 'how many faces are live is the difference between waking and ready');
+  assert.match(mainSource, /setDetailInterest\(event\.newState === 'open'/, 'workspace details are refreshed when asked for, never in the background');
+  assert.match(mainSource, /if \(stateChanged && snapshot\.state\)/, 'only a state change reaches the live region');
+  assert.match(mainSource, /if \(cloud && cloudCancelled\) return;/, 'a cancelled wake must survive a tab switch');
+
+  const lifecycleModule = await fetch(`${httpBase}/app/workspace.js`);
+  assert.equal(lifecycleModule.status, 200, 'the lifecycle module should be served');
 
   const shader = await fetch(`${httpBase}/app/shader.js`);
   assert.equal(shader.status, 200, 'custom shader should be served');

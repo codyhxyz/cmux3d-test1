@@ -31,6 +31,7 @@
         </header>
 
         <ul class="host-list" id="host-list"></ul>
+        <p class="host-policy" id="host-policy" hidden></p>
 
         <div class="connect-actions connect-actions--top">
           <button type="button" id="host-add">Add a computer</button>
@@ -124,6 +125,18 @@
         <button type="button" id="retry-now">Retry now</button>
         <button type="button" popovertarget="connect-panel">Change computer</button>
       </p>
+      <!-- One honest progress surface shared by all six faces. It sits over the cube
+           rather than in front of it: the cube stays visible and stays usable. -->
+      <div class="wake" id="wake" hidden>
+        <p class="wake-head"><i data-tone></i><strong id="wake-label">Waking</strong></p>
+        <p class="wake-detail" id="wake-detail">Starting your workspace…</p>
+        <p class="wake-note" id="wake-note" hidden></p>
+        <p class="wake-elapsed" id="wake-elapsed" hidden></p>
+        <button type="button" id="wake-action" hidden>Cancel</button>
+      </div>
+      <!-- Lifecycle changes are announced here, once each, so a screen reader hears
+           "Waking" and "Ready" without the elapsed counter talking over typing. -->
+      <p class="sr-only" id="workspace-live" role="status" aria-live="polite"></p>
       <p class="sr-only" id="cube-instructions">Drag to rotate, pinch or use the mouse wheel to zoom, and select a face to focus it. Tap away from the cube, or press Escape, to release it.</p>
       <section class="rig" id="rig" aria-describedby="cube-instructions">
         <article class="panel panel--front" data-face="0">

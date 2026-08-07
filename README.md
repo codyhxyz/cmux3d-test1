@@ -30,6 +30,51 @@ CODING_CUBE_HERDR=herdr CODING_CUBE_WORKSPACE="My Cube" npm start
 Herdr mode idempotently creates the workspace and its `Face 1` through `Face 6`
 tabs when missing. Existing faces and unrelated workspaces or tabs are left alone.
 
+## In the cloud
+
+The six faces can run on an AWS Bedrock AgentCore runtime instead of this machine —
+files on EFS at `/mnt/workspace`, compute billed only while it is awake, and the whole
+cube asleep when it is idle. One command:
+
+```bash
+CUBE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-east-1:808175385344:runtime/coding_cube_nat-3RJI162JL3 \
+CUBE_AWS_PROFILE=coding-cube \
+npm start
+```
+
+Open <http://127.0.0.1:8064/> and pick **Cloud (AgentCore)** in Computers. Put those two
+exports in your shell profile and it is just `npm start`.
+
+`CUBE_RUNTIME_ARN` is the whole switch: without it there is no `/mint` endpoint and
+nothing about the local cube changes. `npm run cloud` is the same thing with a loud
+error instead of a silent local start when the ARN is missing.
+
+The Cube and the minting API are served from **one origin** on purpose. A browser cannot
+hold AWS credentials, so the server signs one short-lived shell URL per face per
+reconnect — and Chrome now refuses an `https` page's fetch to `127.0.0.1` outright, so
+the page has to come from the same place as the API rather than reaching across to it.
+
+### The AWS profile
+
+`CUBE_AWS_PROFILE` names a profile whose credentials do not expire. Without one the
+server falls back to the default chain, which for `aws login` means it stops minting
+roughly once a day: every face reports `AWS login required`, stops reconnecting, and
+waits for you to run `aws login` and press **Retry**.
+
+To create a user that can do exactly two things — invoke that one runtime and open
+shells on it — and store its key in the profile:
+
+```bash
+sh spike/aws/create-minter-user.sh --dry-run   # read-only; prints the policy
+sh spike/aws/create-minter-user.sh             # asks before it mutates AWS
+```
+
+It creates nothing else and can delete nothing, which matters because the key sits in
+plaintext in `~/.aws/credentials`. The script prints its own teardown.
+
+`spike/aws/create-runtime.sh`, `create-efs.sh` and `create-egress.sh` build the runtime
+itself; `spike/README.md` covers that, and `spike/RESULTS.md` is what was measured.
+
 ## Controls
 
 - Drag to orbit the cube

@@ -1,0 +1,36 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadTheCallersWorkspaceRow",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:UpdateItem"
+      ],
+      "Resource": "arn:aws:dynamodb:us-east-1:808175385344:table/coding-cube-workspaces"
+    },
+    {
+      "Sid": "OnlyPerUserRuntimes",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock-agentcore:InvokeAgentRuntime",
+        "bedrock-agentcore:InvokeAgentRuntimeCommandShell",
+        "bedrock-agentcore:StopRuntimeSession"
+      ],
+      "Resource": [
+        "arn:aws:bedrock-agentcore:us-east-1:808175385344:runtime/cube_u_*",
+        "arn:aws:bedrock-agentcore:us-east-1:808175385344:runtime/cube_u_*/*"
+      ]
+    },
+    {
+      "Sid": "MintLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:us-east-1:808175385344:log-group:/aws/lambda/coding-cube-mint:*"
+    }
+  ]
+}

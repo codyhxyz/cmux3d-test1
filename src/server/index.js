@@ -1,10 +1,15 @@
 import { execFile } from 'node:child_process';
 import { pairingUrl } from '../../public/app/connection-config.js';
+import { attachCloud } from './cloud/gateway.js';
 import { readServerOptions } from './config.js';
 import { createRuntime } from './runtime.js';
 import { createTailnetIdentity, offerServe, tailnetAddress } from './tailscale.js';
 
 const options = readServerOptions();
+if (options.cloudRequested && !options.cloud) {
+  console.error('--cloud needs a runtime: set CUBE_RUNTIME_ARN, or pass --runtime-arn <arn>.');
+  process.exit(2);
+}
 const useTailnet = options.expose || options.serveOnly;
 const tailnet = useTailnet && process.env.CODING_CUBE_LOCAL_ONLY !== '1' ? await tailnetAddress() : null;
 const peers = tailnet && options.trustTailnet
@@ -17,9 +22,30 @@ const runtime = createRuntime({
   tailnet: peers,
 });
 
+// Before listen(), because mounting takes over the server's 'request' listener.
+const minter = options.cloud
+  ? attachCloud(runtime.server, {
+    cloud: options.cloud,
+    webOrigin: options.webOrigin,
+    token: options.token,
+    exposure: runtime.exposure,
+    tailnet: peers,
+    log: (line) => console.log(line),
+  })
+  : null;
+
 runtime.start().then(({ host, port }) => {
   console.log(`coding-cube is listening at http://${host}:${port}/`);
   if (options.rotated) console.log('pairing code rotated; paired phones must pair again');
+
+  if (minter) {
+    console.log('');
+    console.log(`  cloud   : ${minter.runtimeArn}`);
+    console.log(`  aws     : ${minter.profile ? `profile ${minter.profile}` : 'default credential chain (expires with `aws login`)'}`);
+    console.log(`  session : ${minter.sessionId}${minter.pinSession ? ' (pinned)' : ' (the browser names its own)'}`);
+    console.log('  Pick Cloud (AgentCore) in Computers; six faces attach to one runtime session.');
+    console.log('');
+  }
 
   if (options.expose && tailnet) {
     const phoneOrigin = `http://${tailnet.dnsName}:${port}`;

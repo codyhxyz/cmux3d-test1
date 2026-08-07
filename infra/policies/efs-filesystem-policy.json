@@ -1,0 +1,36 @@
+{
+  "Version": "2012-10-17",
+  "Id": "coding-cube-access-points-only",
+  "Statement": [
+    {
+      "Sid": "RefuseAnyMountThatDoesNotGoThroughAnAccessPoint",
+      "Effect": "Deny",
+      "Principal": {
+        "AWS": "*"
+      },
+      "Action": "*",
+      "Condition": {
+        "Null": {
+          "elasticfilesystem:AccessPointArn": "true"
+        }
+      }
+    },
+    {
+      "Sid": "AllowAccessPointScopedClientsOnly",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "*"
+      },
+      "Action": [
+        "elasticfilesystem:ClientMount",
+        "elasticfilesystem:ClientWrite",
+        "elasticfilesystem:ClientRootAccess"
+      ],
+      "Condition": {
+        "Null": {
+          "elasticfilesystem:AccessPointArn": "false"
+        }
+      }
+    }
+  ]
+}

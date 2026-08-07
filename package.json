@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/server/index.js",
     "dev": "node src/server/index.js",
+    "cloud": "node src/server/index.js --cloud",
     "smoke": "node tests/smoke.mjs"
   },
   "dependencies": {
