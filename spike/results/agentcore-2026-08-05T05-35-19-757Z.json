@@ -1,0 +1,20 @@
+{
+  "runtimeArn": "arn:aws:bedrock-agentcore:us-east-1:808175385344:runtime/coding_cube_spike-2JI9VQCOZh",
+  "region": "us-east-1",
+  "auth": "presign",
+  "signer": "builtin",
+  "ranAt": "2026-08-05T05:35:19.757Z",
+  "results": [
+    {
+      "id": "T-10",
+      "title": "10-shell cap scope",
+      "verdict": "PASS",
+      "measured": "cap is PER RUNTIME SESSION — 12 shells open across two sessions on one runtime",
+      "openedOnA": 6,
+      "openedOnB": 6,
+      "maxTotalShells": 12,
+      "errors": [],
+      "elapsedMs": 24480
+    }
+  ]
+}

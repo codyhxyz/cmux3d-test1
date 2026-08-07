@@ -5,3 +5,6 @@ server.pid
 .DS_Store
 .env
 coverage/
+
+# Local machine state: which AgentCore workspace this checkout is pointed at.
+.cube-session

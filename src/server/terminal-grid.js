@@ -119,9 +119,26 @@ export class TerminalGrid {
     };
     for (const key of ['HERDR_ENV', 'HERDR_SOCKET_PATH', 'HERDR_PANE_ID', 'HERDR_TAB_ID']) delete env[key];
 
+    // --takeover is not optional. Closing a socket kills this PTY, but the herdr
+    // side of the attach takes a moment longer to let go, and herdr refuses a
+    // second attach in that window: "terminal <id> already has an attached client;
+    // retry with --takeover". Measured on a live container — reconnecting to a face
+    // with no gap after disconnecting returned 548 bytes of that refusal, the PTY
+    // exited 1, and the socket closed 1012 "shell exited" instead of showing the
+    // terminal. A browser page reload is exactly that sequence, so without this a
+    // refresh reliably kills the face it reloads.
+    //
+    // Takeover is also the right semantics rather than a workaround: the gateway is
+    // the only thing that ever attaches to these six terminals, so a client already
+    // holding one is always a stale attach that has not finished dying, never a
+    // second user whose session we would be stealing.
+    //
+    // The flag goes AFTER the terminal id even though `herdr terminal attach --help`
+    // prints `[OPTIONS] <TERMINAL_ID>`. Measured: the documented order makes herdr
+    // exit 2 with "unknown option: term_…" and the face never opens at all.
     const term = pty.spawn(
       this.herdr || this.shell,
-      this.herdr ? ['--session', 'default', 'terminal', 'attach', this.targets[face]] : [],
+      this.herdr ? ['--session', 'default', 'terminal', 'attach', this.targets[face], '--takeover'] : [],
       { name: 'xterm-256color', cols: 90, rows: 28, cwd: this.cwd, env },
     );
 

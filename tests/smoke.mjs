@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import { HandController, handSample } from '../public/app/hand-tracking.js';
 import { herdrMetadata } from '../public/app/herdr.js';
 import { accessoryKeyInput, commandKeyInput, commandPromptDirection, ctrlCode, promptLine } from '../public/app/terminal-keys.js';
-import { DEFAULT_CLOUD_HOST_ORIGIN, mixedContentBlocked, normalizeHostOrigin, pairingUrl, parseFragment } from '../public/app/connection-config.js';
+import { DEFAULT_AGENTCORE_ORIGIN, mixedContentBlocked, normalizeHostOrigin, pairingUrl, parseFragment } from '../public/app/connection-config.js';
 import qrcode from 'qrcode-generator';
 import {
   DAMPING,
@@ -35,6 +37,7 @@ import { loadOrCreateToken, rotateToken } from '../src/server/token-store.js';
 await checkHerdrStateEndpoint();
 await checkGatewayOnly();
 await checkRenamedBrowserStore();
+await checkAwsLoginFailStop();
 
 assert.equal(commandKeyInput({ key: 'ArrowLeft', metaKey: true }), '\x01', 'command-left should move to the start of the shell input');
 assert.equal(commandKeyInput({ key: 'ArrowRight', metaKey: true }), '\x05', 'command-right should move to the end of the shell input');
@@ -97,7 +100,8 @@ assert.notEqual(rotateToken(tokenEnv), firstToken, 'rotating should invalidate t
 assert.equal(readServerOptions({ ...tokenEnv, CODING_CUBE_TOKEN: 'from-env' }, []).token, 'from-env', 'an explicit token should win over the stored one');
 await rm(tokenDir, { recursive: true, force: true });
 
-assert.equal(DEFAULT_CLOUD_HOST_ORIGIN, 'https://cloud-agent.tail47c266.ts.net', 'the hosted cube should know its cloud terminal gateway without pairing');
+assert.equal(DEFAULT_AGENTCORE_ORIGIN, 'http://127.0.0.1:8787', 'the hosted cube should reach its cloud through the local minter without pairing');
+assert.doesNotMatch(await readFile('public/app/connection.js', 'utf8'), /tail47c266/, 'the always-on box AgentCore replaced must not come back as a second cloud');
 assert.equal(normalizeHostOrigin('mymac.tailnet.ts.net'), 'https://mymac.tailnet.ts.net', 'a bare address needs TLS to be reachable from the hosted page');
 assert.equal(normalizeHostOrigin('127.0.0.1:8064'), 'http://127.0.0.1:8064', 'loopback stays plain http');
 assert.equal(normalizeHostOrigin('https://mymac.ts.net/'), 'https://mymac.ts.net', 'a pasted URL should reduce to its origin');
@@ -374,7 +378,9 @@ try {
   assert.match(terminalSource, /WebglAddon/, 'official WebGL addon should be used');
   assert.match(terminalSource, /attachCustomKeyEventHandler/, 'terminal should install the command-key bindings');
   assert.match(terminalSource, /Math\.min\(1000 \* 2 \*\* entry\.failures\+\+, 60_000\)/, 'terminal retries should back off to a one-minute ceiling');
-  assert.match(terminalSource, /entry\.ws = null;\s*ws\.close\(\)/, 'an inactive browser should release terminal sizing back to Ghostty');
+  assert.match(terminalSource, /AWS login required; run `aws login`, then choose Retry/, 'expired AWS login should require explicit recovery instead of reconnecting');
+  const windowActivity = terminalSource.match(/setWindowActive\(active\) \{([\s\S]*?)\n  \}/)?.[1] || '';
+  assert.doesNotMatch(windowActivity, /ws\.close\(\)/, 'switching tabs should preserve terminal sockets and screen state');
   assert.match(
     terminalSource,
     /focus\(face\) \{[^}]*entry\.term\.focus\(\);/s,
@@ -467,6 +473,108 @@ try {
   await runtime.stop();
 }
 
+async function checkAwsLoginFailStop() {
+  const previousLocation = globalThis.location;
+  let createShellTransport;
+  try {
+    globalThis.location = { origin: 'http://127.0.0.1', protocol: 'http:', hash: '', pathname: '/', search: '' };
+    ({ createShellTransport } = await import('../public/app/transport.js'));
+  } finally {
+    if (previousLocation === undefined) delete globalThis.location;
+    else globalThis.location = previousLocation;
+  }
+  const authError = Object.assign(new Error('AWS login required'), { code: 'AWS_LOGIN_REQUIRED' });
+  let prepareAttempts = 0;
+  const transport = createShellTransport({
+    sessionId: 'cube-test-12345678-1234-1234-1234-123456789012',
+    scrollback: null,
+    mintUrl: async () => { throw authError; },
+    ensureWorkspace: async () => {
+      prepareAttempts += 1;
+      throw authError;
+    },
+  });
+  const closes = await Promise.all(Array.from({ length: 6 }, (_, face) => {
+    const socket = transport.openTerminal(face);
+    return new Promise((resolve) => socket.addEventListener('close', resolve));
+  }));
+  assert.equal(prepareAttempts, 1, 'six faces should share one credential-dependent workspace attempt');
+  assert.ok(closes.every(({ code }) => code === 1011), 'expired AWS login must be a permanent close, not an automatic retry');
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(prepareAttempts, 1, 'expired AWS login must stay stopped until explicit user action');
+
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'coding-cube-aws-auth-'));
+  const bin = path.join(directory, 'bin');
+  const awsCalls = path.join(directory, 'aws-calls');
+  await mkdir(bin);
+  const fakeAws = path.join(bin, 'aws');
+  await writeFile(fakeAws, `#!/bin/sh\nprintf x >> "$AWS_CALLS"\nsleep 1\nexit 1\n`);
+  await chmod(fakeAws, 0o755);
+
+  const env = {
+    ...process.env,
+    HOME: directory,
+    PATH: `${bin}:${process.env.PATH}`,
+    AWS_CALLS: awsCalls,
+    AWS_CONFIG_FILE: path.join(directory, 'config'),
+    AWS_SHARED_CREDENTIALS_FILE: path.join(directory, 'credentials'),
+    AWS_EC2_METADATA_DISABLED: 'true',
+  };
+  for (const key of [
+    'AWS_ACCESS_KEY_ID',
+    'AWS_SECRET_ACCESS_KEY',
+    'AWS_SESSION_TOKEN',
+    'AWS_PROFILE',
+    'AWS_LOGIN_CACHE_DIRECTORY',
+    'AWS_WEB_IDENTITY_TOKEN_FILE',
+    'AWS_ROLE_ARN',
+    'AWS_CONTAINER_CREDENTIALS_FULL_URI',
+    'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
+  ]) delete env[key];
+
+  const port = await unusedPort();
+  const child = spawn(process.execPath, [
+    fileURLToPath(new URL('../spike/mint-server.mjs', import.meta.url)),
+    '--runtime-arn',
+    'arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test',
+    '--port',
+    String(port),
+  ], { env });
+  let output = '';
+  child.stdout.setEncoding('utf8').on('data', (chunk) => { output += chunk; });
+  child.stderr.setEncoding('utf8').on('data', (chunk) => { output += chunk; });
+  const exited = new Promise((resolve) => child.once('exit', resolve));
+
+  try {
+    await waitUntil(() => output.includes('mint server on'), 5000);
+    assert.equal(child.exitCode, null, `minter should stay up without credentials:\n${output}`);
+    const sessionId = 'cube-test-12345678-1234-1234-1234-123456789012';
+    const replies = await Promise.all(Array.from({ length: 6 }, async (_, face) => {
+      const response = await fetch(`http://127.0.0.1:${port}/mint?face=${face}&sessionId=${sessionId}`);
+      return { status: response.status, body: await response.json() };
+    }));
+    assert.ok(replies.every(({ status, body }) => status === 503 && body.code === 'AWS_LOGIN_REQUIRED'), 'all concurrent faces should receive an explicit AWS login stop signal');
+    assert.equal(await readFile(awsCalls, 'utf8').catch(() => ''), '', 'credential failure must never spawn the AWS CLI');
+    assert.equal(child.exitCode, null, 'credential failure should not kill the minter needed for manual recovery');
+  } finally {
+    child.kill();
+    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 2000))]);
+    if (child.exitCode === null) child.kill('SIGKILL');
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function unusedPort() {
+  const server = net.createServer();
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const { port } = server.address();
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
 async function checkRenamedBrowserStore() {
   const data = new Map();
   const storage = {
@@ -492,6 +600,27 @@ async function checkRenamedBrowserStore() {
     assert.equal(connection.activeHost().token, 'secret', 'the product rename must preserve paired computers');
     assert.equal(data.has(legacyKey), false, 'the old browser key should be removed after migration');
     assert.ok(data.has('coding-cube.hosts.v1'), 'the renamed browser key should be written');
+
+    // A browser that used the Tailscale box, then the cloud back when it was called
+    // "Cloud (AgentCore)". Both are stale identities that must not outlive an update.
+    data.set('coding-cube.hosts.v1', JSON.stringify({
+      version: 1,
+      activeOrigin: 'https://cloud-agent.tail47c266.ts.net',
+      hosts: {
+        'https://cloud-agent.tail47c266.ts.net': { origin: 'https://cloud-agent.tail47c266.ts.net', name: 'Cloud Agent', token: '', builtIn: true },
+        'http://127.0.0.1:8787': { origin: 'http://127.0.0.1:8787', name: 'Cloud (AgentCore)', token: '', kind: 'agentcore', builtIn: true },
+        'http://127.0.0.1:8064': { origin: 'http://127.0.0.1:8064', name: 'This computer', token: 'kept', builtIn: true },
+        'https://mymac.tailnet.ts.net': { origin: 'https://mymac.tailnet.ts.net', name: 'mymac', token: 'mine' },
+      },
+    }));
+    const migrated = await import(`../public/app/connection.js?retired-test=${Date.now()}`);
+    const names = migrated.listHosts().map((host) => host.name);
+    assert.equal(names.includes('Cloud Agent'), false, 'a built-in retired by an update must not linger as a second cloud');
+    assert.equal(names.filter((name) => /cloud/i.test(name)).length, 1, 'there should be exactly one cloud');
+    assert.ok(!names.some((name) => /agentcore/i.test(name)), 'the runtime AgentCore is an implementation detail and must never reach the UI');
+    assert.ok(names.includes('mymac'), 'a computer the user paired themselves must survive');
+    assert.equal(migrated.listHosts().find((host) => host.origin === 'http://127.0.0.1:8064')?.token, 'kept', 'a stale name must not cost the user their pairing code');
+    assert.notEqual(migrated.activeHost().origin, 'https://cloud-agent.tail47c266.ts.net', 'the active host must move off a retired built-in');
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete globalThis[key];
@@ -570,7 +699,7 @@ if [ "$1:$2:$3:$4" = "--session:default:status:server" ]; then
 elif [ "$1:$2:$3:$4" = "--session:default:api:snapshot" ]; then
   cat "$CODING_CUBE_TEST_HERDR_STATE"
 elif [ "$1:$2:$3:$4" = "--session:default:terminal:attach" ]; then
-  printf 'attached:%s\\n' "$5"
+  printf 'attached:%s:%s\\n' "$5" "$6"
   while IFS= read -r line; do printf 'echo:%s:size:%s\\n' "$line" "$(stty size)"; done
 else
   exit 2
@@ -607,7 +736,11 @@ fi
     );
 
     const face = await openPty(wsBase, 2, 0);
-    await face.waitFor('attached:term-2');
+    // The id must come first and --takeover must be present. Both halves are
+    // load-bearing against the real binary: the flag before the id makes herdr exit
+    // 2 with "unknown option", and no flag at all makes a reconnect fail with
+    // "already has an attached client", which is what a browser reload does.
+    await face.waitFor('attached:term-2:--takeover');
     face.input('cube-probe\r');
     await face.waitFor('echo:cube-probe:size:24 80');
 

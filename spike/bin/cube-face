@@ -1,0 +1,44 @@
+#!/bin/sh
+# A platform-spawned AgentCore shell execs into this to become face N. The cwd,
+# TERM, HOME and uid AgentCore hands that shell are all undocumented, so nothing
+# below reads any of them.
+set -eu
+
+cd / 2>/dev/null || true
+
+FACE="${1:-}"
+case "$FACE" in
+  1|2|3|4|5|6) ;;
+  *) echo 'usage: cube-face <1..6>' >&2; exit 64 ;;
+esac
+
+# A stale pane context would be replayed by the agent-status hook and corrupt the
+# very signal /ping reports to the platform.
+unset HERDR_ENV HERDR_PANE_ID HERDR_TAB_ID
+
+# HOME is the whole game. herdr ignores HERDR_SOCKET_PATH whenever --session is
+# passed and every call here passes --session default, so the socket path is
+# $HOME-derived and pinning HOME is the only thing that makes this face and the
+# gateway agree on which server they are talking to. HERDR_SOCKET_PATH is set
+# from the pinned HOME so an inherited value cannot point somewhere else either.
+HOME=/home/cube
+HERDR_SOCKET_PATH="$HOME/.config/herdr/herdr.sock"
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+TERM=xterm-256color
+COLORTERM=truecolor
+LANG="${LANG:-en_US.UTF-8}"
+CODING_CUBE_FACE=$((FACE - 1))
+CODING_CUBE_SLOT=0
+CODING_CUBE_SESSION="$CODING_CUBE_FACE.$CODING_CUBE_SLOT"
+export HOME HERDR_SOCKET_PATH PATH TERM COLORTERM LANG
+export CODING_CUBE_FACE CODING_CUBE_SLOT CODING_CUBE_SESSION
+
+cd "${CODING_CUBE_WORKDIR:-/mnt/workspace/work}" 2>/dev/null || cd "$HOME" 2>/dev/null || cd /
+
+# Terminal ids are minted fresh by every herdr server start and are not persisted,
+# so they can only be resolved live, from inside the container.
+TERMINAL_ID="$(/usr/local/bin/cube-wait-face "$FACE")"
+
+# exec so leaving the attach ends the shell, matching the 1012 "shell exited"
+# semantics the browser already knows how to handle.
+exec /usr/local/bin/herdr --session default terminal attach "$TERMINAL_ID"

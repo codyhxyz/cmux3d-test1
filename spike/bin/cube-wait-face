@@ -1,0 +1,97 @@
+#!/usr/local/bin/node
+// Blocks until the gateway has a live terminal for a face, then prints its id.
+// Terminal ids are minted fresh by every herdr server start and are never
+// persisted, so a client-side cache is stale by definition and this is the only
+// place the binding can be resolved correctly.
+//
+// Deliberately import-free. The file has no extension and sits outside any
+// package, so leaving the module system unstated keeps it loadable either way.
+// The absolute shebang exists for the same reason: a platform-spawned shell's
+// PATH is undocumented.
+
+const GATEWAY = process.env.CODING_CUBE_GATEWAY_URL || 'http://127.0.0.1:8080';
+const TIMEOUT_MS = Number(process.env.CUBE_WAIT_TIMEOUT_MS || 120000);
+const REQUEST_MS = 4000;
+const POLL_MS = 500;
+
+function say(line) {
+  process.stderr.write(`\x1b[2m[cube] ${line}\x1b[0m\r\n`);
+}
+
+// Exit rather than fall off the end: undici can leave a pooled socket behind,
+// and the write callback is what guarantees the id reached the pipe first.
+function stop(code, stream, line) {
+  stream.write(line, () => {
+    process.exitCode = code;
+    process.exit(code);
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function askGateway(face) {
+  const response = await fetch(`${GATEWAY}/internal/face/${face}`, {
+    headers: { accept: 'application/json' },
+    signal: AbortSignal.timeout(REQUEST_MS),
+  });
+  if (!response.ok) throw new Error(`gateway answered ${response.status}`);
+  return response.json();
+}
+
+async function main() {
+  const face = Number(process.argv[2]);
+  if (!Number.isInteger(face) || face < 1 || face > 6) {
+    stop(64, process.stderr, 'usage: cube-wait-face <1..6>\r\n');
+    return;
+  }
+
+  say(`face ${face}: waiting for the coding-cube gateway`);
+  const deadline = Date.now() + TIMEOUT_MS;
+  let announced = null;
+  let lastFailure = '';
+
+  while (Date.now() < deadline) {
+    let state = null;
+    try {
+      state = await askGateway(face);
+      lastFailure = '';
+    } catch (error) {
+      lastFailure = error && error.message ? error.message : String(error);
+    }
+
+    if (!state) {
+      // The gateway binds before it bootstraps, so a refused connection only
+      // means the container is still coming up.
+      if (announced !== 'unreachable') {
+        announced = 'unreachable';
+        say(`gateway not answering yet (${lastFailure})`);
+      }
+    } else {
+      const phase = String(state.phase || state.state || 'booting');
+      if (phase !== announced) {
+        announced = phase;
+        say(state.detail ? `${phase} — ${state.detail}` : phase);
+      }
+      if (state.error) {
+        stop(1, process.stderr, `\x1b[31m[cube] bootstrap failed: ${state.error}\x1b[0m\r\n`);
+        return;
+      }
+      if (state.state === 'ready' && state.terminalId) {
+        stop(0, process.stdout, `${state.terminalId}\n`);
+        return;
+      }
+    }
+
+    await sleep(POLL_MS);
+  }
+
+  const why = lastFailure ? ` (${lastFailure})` : '';
+  say(`gave up after ${Math.round(TIMEOUT_MS / 1000)}s${why}`);
+  stop(1, process.stderr, '\x1b[31m[cube] the gateway never reported this face ready; check the container log\x1b[0m\r\n');
+}
+
+main().catch((error) => {
+  stop(1, process.stderr, `\x1b[31m[cube] cube-wait-face failed: ${error && error.stack ? error.stack : error}\x1b[0m\r\n`);
+});

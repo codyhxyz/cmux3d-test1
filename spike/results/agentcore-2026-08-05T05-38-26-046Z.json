@@ -1,0 +1,21 @@
+{
+  "runtimeArn": "arn:aws:bedrock-agentcore:us-east-1:808175385344:runtime/coding_cube_spike-2JI9VQCOZh",
+  "region": "us-east-1",
+  "auth": "presign",
+  "signer": "builtin",
+  "ranAt": "2026-08-05T05:38:26.047Z",
+  "results": [
+    {
+      "id": "T-16a",
+      "title": "Reconnect with the same shellId",
+      "verdict": "PASS",
+      "measured": "reconnected=true replayedMarker=true bytesDropped=0",
+      "sessionId": "cube-spike-25f74f42-cc92-4396-b72c-d1ca76c0cdbb",
+      "shellId": "face-1",
+      "reconnected": true,
+      "bytesDropped": 0,
+      "replayedMarker": true,
+      "elapsedMs": 4434
+    }
+  ]
+}

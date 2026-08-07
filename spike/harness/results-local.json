@@ -1,0 +1,232 @@
+{
+  "startedAt": "2026-08-05T08:19:03.968Z",
+  "base": "http://127.0.0.1:8080",
+  "phase": "after-restart",
+  "tests": [
+    {
+      "id": "T-01",
+      "title": "gateway answers /ping",
+      "ms": 16,
+      "status": "pass",
+      "msToFirstPing": 16,
+      "pingStatus": "Healthy"
+    },
+    {
+      "id": "T-02",
+      "title": "bootstrap reaches ready with six faces",
+      "ms": 7,
+      "status": "pass",
+      "snapshotError": null,
+      "elapsedMs": 159,
+      "phases": [
+        {
+          "phase": "mount",
+          "ms": 1,
+          "ok": true
+        },
+        {
+          "phase": "restore",
+          "ms": 8,
+          "ok": true
+        },
+        {
+          "phase": "workdir",
+          "ms": 0,
+          "ok": true
+        },
+        {
+          "phase": "herdr-server",
+          "ms": 3,
+          "ok": true
+        },
+        {
+          "phase": "herdr-ready",
+          "ms": 2,
+          "ok": true
+        },
+        {
+          "phase": "workspace",
+          "ms": 27,
+          "ok": true
+        },
+        {
+          "phase": "faces",
+          "ms": 0,
+          "ok": true
+        },
+        {
+          "phase": "integrations",
+          "ms": 6,
+          "ok": true
+        },
+        {
+          "phase": "busy",
+          "ms": 112,
+          "ok": true
+        }
+      ],
+      "mount": {
+        "path": "/mnt/workspace",
+        "present": true,
+        "writable": true,
+        "directory": true,
+        "device": "53",
+        "waitedMs": 1,
+        "reason": null,
+        "firstBoot": false
+      },
+      "herdr": {
+        "executable": "/usr/local/bin/herdr",
+        "version": "herdr 0.8.0",
+        "socket": "/home/cube/.config/herdr/herdr.sock",
+        "socketModes": {
+          "herdr-client.sock": "0666",
+          "herdr.sock": "0666"
+        },
+        "integrations": [
+          {
+            "name": "claude",
+            "ok": true,
+            "output": "installed claude integration hook to /home/cube/.claude/hooks/herdr-agent-state.sh\nensured claude settings at /home/cube/.claude/settings.json"
+          },
+          {
+            "name": "pi",
+            "ok": true,
+            "output": "installed pi integration to /home/cube/.pi/agent/extensions/herdr-agent-state.ts"
+          }
+        ],
+        "supervisedPid": 20
+      },
+      "faces": [
+        {
+          "face": 0,
+          "label": "Face 1",
+          "cwd": "/mnt/workspace/work",
+          "tabId": "w1:t1",
+          "paneId": "w1:p1",
+          "terminalId": "term_658486aa48a781",
+          "agentStatus": "unknown"
+        },
+        {
+          "face": 1,
+          "label": "Face 2",
+          "cwd": "/mnt/workspace/work",
+          "tabId": "w1:t2",
+          "paneId": "w1:p2",
+          "terminalId": "term_658486aa48f4e2",
+          "agentStatus": "unknown"
+        },
+        {
+          "face": 2,
+          "label": "Face 3",
+          "cwd": "/mnt/workspace/work",
+          "tabId": "w1:t3",
+          "paneId": "w1:p3",
+          "terminalId": "term_658486aa491423",
+          "agentStatus": "unknown"
+        },
+        {
+          "face": 3,
+          "label": "Face 4",
+          "cwd": "/mnt/workspace/work",
+          "tabId": "w1:t4",
+          "paneId": "w1:p4",
+          "terminalId": "term_658486aa4930c4",
+          "agentStatus": "unknown"
+        },
+        {
+          "face": 4,
+          "label": "Face 5",
+          "cwd": "/mnt/workspace/work",
+          "tabId": "w1:t5",
+          "paneId": "w1:p5",
+          "terminalId": "term_658486aa494fc5",
+          "agentStatus": "unknown"
+        },
+        {
+          "face": 5,
+          "label": "Face 6",
+          "cwd": "/mnt/workspace/work",
+          "tabId": "w1:t6",
+          "paneId": "w1:p6",
+          "terminalId": "term_658486aa497126",
+          "agentStatus": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "T-04",
+      "title": "faces and pane history survive a restart",
+      "ms": 21653,
+      "status": "pass",
+      "faces": [
+        {
+          "face": 0,
+          "label": "Face 1",
+          "cwd": "/mnt/workspace/work",
+          "tabId": "w1:t1",
+          "paneId": "w1:p1",
+          "terminalId": "term_658486aa48a781",
+          "agentStatus": "unknown"
+        },
+        {
+          "face": 1,
+          "label": "Face 2",
+          "cwd": "/mnt/workspace/work",
+          "tabId": "w1:t2",
+          "paneId": "w1:p2",
+          "terminalId": "term_658486aa48f4e2",
+          "agentStatus": "unknown"
+        },
+        {
+          "face": 2,
+          "label": "Face 3",
+          "cwd": "/mnt/workspace/work",
+          "tabId": "w1:t3",
+          "paneId": "w1:p3",
+          "terminalId": "term_658486aa491423",
+          "agentStatus": "unknown"
+        },
+        {
+          "face": 3,
+          "label": "Face 4",
+          "cwd": "/mnt/workspace/work",
+          "tabId": "w1:t4",
+          "paneId": "w1:p4",
+          "terminalId": "term_658486aa4930c4",
+          "agentStatus": "unknown"
+        },
+        {
+          "face": 4,
+          "label": "Face 5",
+          "cwd": "/mnt/workspace/work",
+          "tabId": "w1:t5",
+          "paneId": "w1:p5",
+          "terminalId": "term_658486aa494fc5",
+          "agentStatus": "unknown"
+        },
+        {
+          "face": 5,
+          "label": "Face 6",
+          "cwd": "/mnt/workspace/work",
+          "tabId": "w1:t6",
+          "paneId": "w1:p6",
+          "terminalId": "term_658486aa497126",
+          "agentStatus": "unknown"
+        }
+      ],
+      "reusedTerminalIds": [],
+      "replayOnReattach": {
+        "token": "CUBEREPLAY-f596edb4",
+        "replayed": true,
+        "replayBytes": 47110
+      },
+      "priorMarker": {
+        "token": "CUBEHIST-6542179f",
+        "survivedRestart": false,
+        "replayBytes": 47110
+      },
+      "note": "expected: herdr keeps pane content in memory, so a restart blanks every screen. Cross-restart scrollback is the browser store in public/app/transport.js."
+    }
+  ]
+}

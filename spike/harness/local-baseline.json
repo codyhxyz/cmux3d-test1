@@ -1,0 +1,62 @@
+{
+  "recordedAt": "2026-08-05T08:18:29.091Z",
+  "base": "http://127.0.0.1:8080",
+  "snapshotError": null,
+  "historyToken": "CUBEHIST-6542179f",
+  "faces": [
+    {
+      "face": 0,
+      "label": "Face 1",
+      "cwd": "/mnt/workspace/work",
+      "tabId": "w1:t1",
+      "paneId": "w1:p1",
+      "terminalId": "term_6584868de69b71",
+      "agentStatus": "unknown"
+    },
+    {
+      "face": 1,
+      "label": "Face 2",
+      "cwd": "/mnt/workspace/work",
+      "tabId": "w1:t2",
+      "paneId": "w1:p2",
+      "terminalId": "term_6584868de76472",
+      "agentStatus": "unknown"
+    },
+    {
+      "face": 2,
+      "label": "Face 3",
+      "cwd": "/mnt/workspace/work",
+      "tabId": "w1:t3",
+      "paneId": "w1:p3",
+      "terminalId": "term_6584868de7ebf3",
+      "agentStatus": "unknown"
+    },
+    {
+      "face": 3,
+      "label": "Face 4",
+      "cwd": "/mnt/workspace/work",
+      "tabId": "w1:t4",
+      "paneId": "w1:p4",
+      "terminalId": "term_6584868de84f44",
+      "agentStatus": "unknown"
+    },
+    {
+      "face": 4,
+      "label": "Face 5",
+      "cwd": "/mnt/workspace/work",
+      "tabId": "w1:t5",
+      "paneId": "w1:p5",
+      "terminalId": "term_6584868de8b1d5",
+      "agentStatus": "unknown"
+    },
+    {
+      "face": 5,
+      "label": "Face 6",
+      "cwd": "/mnt/workspace/work",
+      "tabId": "w1:t6",
+      "paneId": "w1:p6",
+      "terminalId": "term_6584868de90ad6",
+      "agentStatus": "unknown"
+    }
+  ]
+}

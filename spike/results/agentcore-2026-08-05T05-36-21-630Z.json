@@ -1,0 +1,28 @@
+{
+  "runtimeArn": "arn:aws:bedrock-agentcore:us-east-1:808175385344:runtime/coding_cube_spike-2JI9VQCOZh",
+  "region": "us-east-1",
+  "auth": "presign",
+  "signer": "builtin",
+  "ranAt": "2026-08-05T05:36:21.630Z",
+  "results": [
+    {
+      "id": "T-13",
+      "title": "Session isolation",
+      "verdict": "PASS",
+      "measured": "session B cannot see session A files",
+      "sessionA": "cube-spike-29a3e6ee-7e07-415c-a346-544d40c66509",
+      "sessionB": "cube-spike-661d7418-6545-46fb-b580-f0b60069e576",
+      "wrote": {
+        "code": 0,
+        "stdout": "iso-1785908178435",
+        "stderr": ""
+      },
+      "read": {
+        "code": 0,
+        "stdout": "cat: /mnt/workspace/iso.txt: No such file or directory\n",
+        "stderr": ""
+      },
+      "elapsedMs": 3196
+    }
+  ]
+}

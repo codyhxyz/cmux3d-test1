@@ -1,0 +1,435 @@
+{
+  "runtimeArn": "arn:aws:bedrock-agentcore:us-east-1:808175385344:runtime/coding_cube_spike-2JI9VQCOZh",
+  "region": "us-east-1",
+  "auth": "presign",
+  "signer": "builtin",
+  "ranAt": "2026-08-05T07:12:00.924Z",
+  "results": [
+    {
+      "id": "T-11",
+      "title": "InvokeAgentRuntimeCommandShell in the target region",
+      "verdict": "PASS",
+      "measured": "shell opened in us-east-1 via presign in 1587ms",
+      "attempts": [
+        {
+          "auth": "presign",
+          "ok": true,
+          "elapsedMs": 1587,
+          "shellId": "cube-probe",
+          "reconnected": false
+        }
+      ],
+      "region": "us-east-1",
+      "confirmedShellId": "cube-probe",
+      "elapsedMs": 1767
+    },
+    {
+      "id": "T-10",
+      "title": "10-shell cap scope",
+      "verdict": "PASS",
+      "measured": "cap is PER RUNTIME SESSION — 12 shells open across two sessions on one runtime",
+      "openedOnA": 6,
+      "openedOnB": 6,
+      "maxTotalShells": 12,
+      "errors": [],
+      "elapsedMs": 8256
+    },
+    {
+      "id": "T-08",
+      "title": "Cold start",
+      "verdict": "PASS",
+      "measured": "1185ms to state=ready",
+      "sessionId": "cube-spike-7dc5c456-319d-4585-a168-567bdc9aa18a",
+      "elapsedMs": 1185,
+      "phases": [
+        {
+          "phase": "mount",
+          "ms": 3,
+          "ok": true
+        },
+        {
+          "phase": "restore",
+          "ms": 11,
+          "ok": true
+        },
+        {
+          "phase": "workdir",
+          "ms": 0,
+          "ok": true
+        },
+        {
+          "phase": "herdr-server",
+          "ms": 10,
+          "ok": true
+        },
+        {
+          "phase": "herdr-ready",
+          "ms": 3,
+          "ok": true
+        },
+        {
+          "phase": "workspace",
+          "ms": 138,
+          "ok": true
+        },
+        {
+          "phase": "faces",
+          "ms": 3,
+          "ok": true
+        },
+        {
+          "phase": "integrations",
+          "ms": 16,
+          "ok": true
+        },
+        {
+          "phase": "busy",
+          "ms": 139,
+          "ok": true
+        }
+      ],
+      "mount": {
+        "path": "/mnt/workspace",
+        "present": true,
+        "writable": true,
+        "directory": true,
+        "device": "49",
+        "waitedMs": 3,
+        "reason": null,
+        "firstBoot": true
+      },
+      "faces": 6,
+      "body": {
+        "op": "state",
+        "state": "ready",
+        "phase": "ready",
+        "error": null,
+        "elapsedMs": 323,
+        "phases": [
+          {
+            "phase": "mount",
+            "ms": 3,
+            "ok": true
+          },
+          {
+            "phase": "restore",
+            "ms": 11,
+            "ok": true
+          },
+          {
+            "phase": "workdir",
+            "ms": 0,
+            "ok": true
+          },
+          {
+            "phase": "herdr-server",
+            "ms": 10,
+            "ok": true
+          },
+          {
+            "phase": "herdr-ready",
+            "ms": 3,
+            "ok": true
+          },
+          {
+            "phase": "workspace",
+            "ms": 138,
+            "ok": true
+          },
+          {
+            "phase": "faces",
+            "ms": 3,
+            "ok": true
+          },
+          {
+            "phase": "integrations",
+            "ms": 16,
+            "ok": true
+          },
+          {
+            "phase": "busy",
+            "ms": 139,
+            "ok": true
+          }
+        ],
+        "mode": "session",
+        "mount": {
+          "path": "/mnt/workspace",
+          "present": true,
+          "writable": true,
+          "directory": true,
+          "device": "49",
+          "waitedMs": 3,
+          "reason": null,
+          "firstBoot": true
+        },
+        "boot": {
+          "schemaVersion": 1,
+          "imageDigest": null,
+          "firstBootAt": 1785912133298,
+          "lastBootAt": 1785912133298,
+          "boots": 1,
+          "firstBoot": true,
+          "imageChanged": false
+        },
+        "links": [
+          {
+            "from": "/home/cube/.claude",
+            "to": "/mnt/workspace/home/.claude",
+            "action": "seeded"
+          },
+          {
+            "from": "/home/cube/.pi",
+            "to": "/mnt/workspace/home/.pi",
+            "action": "seeded"
+          },
+          {
+            "from": "/home/cube/.ssh",
+            "to": "/mnt/workspace/home/.ssh",
+            "action": "seeded"
+          },
+          {
+            "from": "/home/cube/.coding-cube",
+            "to": "/mnt/workspace/home/.coding-cube",
+            "action": "seeded"
+          },
+          {
+            "from": "/home/cube/.config/herdr/plugins",
+            "to": "/mnt/workspace/home/herdr/plugins",
+            "action": "seeded"
+          }
+        ],
+        "work": "/mnt/workspace/work",
+        "persistence": {
+          "mode": "session",
+          "durable": true,
+          "allowEphemeral": false,
+          "watchingForMount": false,
+          "adoptions": 0,
+          "lastMountCheckAt": null,
+          "workdir": "/mnt/workspace/work"
+        },
+        "herdr": {
+          "executable": "/usr/local/bin/herdr",
+          "version": "herdr 0.8.0",
+          "socket": "/home/cube/.config/herdr/herdr.sock",
+          "socketModes": {
+            "herdr-client.sock": "0666",
+            "herdr.sock": "0666"
+          },
+          "integrations": [
+            {
+              "name": "claude",
+              "ok": true,
+              "output": "installed claude integration hook to /home/cube/.claude/hooks/herdr-agent-state.sh\nensured claude settings at /home/cube/.claude/settings.json"
+            },
+            {
+              "name": "pi",
+              "ok": false,
+              "error": "Command failed: /usr/local/bin/herdr --session default integration install pi\npi extension directory not found at /home/cube/.pi/agent/extensions. install pi first\n"
+            }
+          ]
+        },
+        "faces": [
+          {
+            "face": 0,
+            "label": "Face 1",
+            "tabId": "w1:t1",
+            "paneId": "w1:p1",
+            "terminalId": "term_65847124f266a1"
+          },
+          {
+            "face": 1,
+            "label": "Face 2",
+            "tabId": "w1:t2",
+            "paneId": "w1:p2",
+            "terminalId": "term_65847124f6a582"
+          },
+          {
+            "face": 2,
+            "label": "Face 3",
+            "tabId": "w1:t3",
+            "paneId": "w1:p3",
+            "terminalId": "term_65847124f83bf3"
+          },
+          {
+            "face": 3,
+            "label": "Face 4",
+            "tabId": "w1:t4",
+            "paneId": "w1:p4",
+            "terminalId": "term_65847125003924"
+          },
+          {
+            "face": 4,
+            "label": "Face 5",
+            "tabId": "w1:t5",
+            "paneId": "w1:p5",
+            "terminalId": "term_65847125047325"
+          },
+          {
+            "face": 5,
+            "label": "Face 6",
+            "tabId": "w1:t6",
+            "paneId": "w1:p6",
+            "terminalId": "term_6584712505fb36"
+          }
+        ],
+        "busy": {
+          "busy": true,
+          "reason": "invocation",
+          "ready": true,
+          "eventsConnected": true,
+          "persistence": "session",
+          "inFlight": 1,
+          "holdSecondsLeft": 0,
+          "seededAt": 1785912133499,
+          "staleMs": 120000,
+          "shells": {
+            "attached": 0,
+            "lastOutputAt": null,
+            "active": false
+          },
+          "tracePath": "/mnt/workspace/.cube/ping-trace.ndjson",
+          "panes": {
+            "w1:p1": {
+              "status": "unknown",
+              "hasAgent": false,
+              "busy": false
+            },
+            "w1:p2": {
+              "status": "unknown",
+              "hasAgent": false,
+              "busy": false
+            },
+            "w1:p3": {
+              "status": "unknown",
+              "hasAgent": false,
+              "busy": false
+            },
+            "w1:p4": {
+              "status": "unknown",
+              "hasAgent": false,
+              "busy": false
+            },
+            "w1:p5": {
+              "status": "unknown",
+              "hasAgent": false,
+              "busy": false
+            },
+            "w1:p6": {
+              "status": "unknown",
+              "hasAgent": false,
+              "busy": false
+            }
+          }
+        },
+        "image": {
+          "digest": null
+        }
+      }
+    },
+    {
+      "id": "T-09",
+      "title": "Platform PTY identity",
+      "verdict": "PASS",
+      "measured": "uid=0 $HOME=/root (gateway /home/cube; cube-face pinning is load-bearing) TERM=xterm-256color exe=/usr/bin/bash pts=/dev/pts/0 stty=32 120 cwd=/",
+      "sessionId": "cube-spike-1055c91c-aafe-4773-a929-a76e5f43a435",
+      "pty": {
+        "uid": 0,
+        "gid": 0,
+        "home": "/root",
+        "term": "xterm-256color",
+        "shellVar": "/bin/bash",
+        "exe": "/usr/bin/bash",
+        "cwd": "/",
+        "stdinIsTty": true,
+        "ptsDevice": "/dev/pts/0",
+        "sttySize": "32 120",
+        "socketUnderPlatformHome": false,
+        "socketUnderPinnedHome": true
+      },
+      "gateway": {
+        "uid": 0,
+        "gid": 0,
+        "home": "/home/cube",
+        "term": "xterm-256color",
+        "shell": "/bin/bash",
+        "cwd": "/opt/coding-cube",
+        "herdrSocket": "/home/cube/.config/herdr/herdr.sock"
+      },
+      "homePinningRequired": true,
+      "bootState": "ready",
+      "probeText": "uid=0\ngid=0\nhome=/root\nterm=xterm-256color\nshellvar=/bin/bash\nexe=/usr/bin/bash\ncwd=/\nstdintty=yes\nptsdev=/dev/pts/0\nsttysize=32 120\nrawsock=no\npinnedsock=yes\n",
+      "failures": [],
+      "elapsedMs": 1847
+    },
+    {
+      "id": "T-15",
+      "title": "Bootstrap-then-attach yields a mounted, durable workspace",
+      "verdict": "PASS",
+      "measured": "fstype=nfs4 durable=true shellWrote=true gatewayRead=true (shell-only control: present=yes fstype=nfs4)",
+      "sessionId": "cube-spike-43dd41ae-f922-4741-8be5-4c126a204e1b",
+      "mode": "session",
+      "mount": {
+        "path": "/mnt/workspace",
+        "present": true,
+        "writable": true,
+        "directory": true,
+        "device": "49",
+        "waitedMs": 3,
+        "reason": null,
+        "firstBoot": true
+      },
+      "fstype": "nfs4",
+      "mountLine": "127.0.0.1:/export /mnt/workspace nfs4 rw,relatime,vers=4.0,rsize=1048576,wsize=1048576,namlen=255,acregmin=3600,acregmax=3600,acdirmin=3600,acdirmax=3600,hard,nocto,proto=tcp,timeo=600,retrans=2,sec=sys,clientaddr=127.0.0.1,local_lock=none,addr=127.0.0.1 0 0",
+      "probeText": "present=yes\nfstype=nfs4\nmountline=127.0.0.1:/export /mnt/workspace nfs4 rw,relatime,vers=4.0,rsize=1048576,wsize=1048576,namlen=255,acregmin=3600,acregmax=3600,acdirmin=3600,acdirmax=3600,hard,nocto,proto=tcp,timeo=600,retrans=2,sec=sys,clientaddr=127.0.0.1,local_lock=none,addr=127.0.0.1 0 0\nwrote=t15-1785913907178\n",
+      "gatewayEcho": "t15-1785913907178",
+      "shellOnlyControl": {
+        "sessionId": "cube-spike-34dbf43f-30b9-404f-ada4-5160a32f2095",
+        "present": "yes",
+        "fstype": "nfs4"
+      },
+      "failures": [],
+      "elapsedMs": 3739
+    },
+    {
+      "id": "T-16a",
+      "title": "Reconnect with the same shellId",
+      "verdict": "PASS",
+      "measured": "reconnected=true samePty=true pid=138 replayedMarker=false bytesDropped=0",
+      "sessionId": "cube-spike-4ddacbbf-b4e3-4a03-b73e-922cc52b7208",
+      "shellId": "face-1",
+      "reconnected": true,
+      "bytesDropped": 0,
+      "replayedMarker": false,
+      "pid": {
+        "before": "138",
+        "after": "138"
+      },
+      "failures": [],
+      "elapsedMs": 3673
+    },
+    {
+      "id": "T-13",
+      "title": "Session isolation",
+      "verdict": "PASS",
+      "measured": "session B cannot see the file session A demonstrably wrote",
+      "sessionA": "cube-spike-fa1f6fb8-7f08-40b7-a2f1-7de139bffa42",
+      "sessionB": "cube-spike-cf8a6adb-8612-4258-b17f-e4feec33f99f",
+      "token": "iso-1785913914590",
+      "wrote": "iso-1785913914590",
+      "read": "cat: /mnt/workspace/iso.txt: No such file or directory",
+      "elapsedMs": 5610
+    },
+    {
+      "id": "T-14",
+      "title": "Real agent turn recorded",
+      "verdict": "UNKNOWN",
+      "measured": "trace lines=1 agent_status observed=[]",
+      "sessionId": "cube-spike-0d0cc3c7-13c3-4c12-b095-014fd7957ce1",
+      "observed": [],
+      "remediation": "Run: node spike/harness/agentcore.mjs attach --face 1 --session cube-spike-0d0cc3c7-13c3-4c12-b095-014fd7957ce1 --confirm, drive a real Claude turn, then re-run T-14 with the same --session.",
+      "elapsedMs": 724
+    }
+  ]
+}

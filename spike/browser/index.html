@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentCore shell harness — T-16</title>
+    <link rel="stylesheet" href="/vendor/xterm.css" />
+    <style>
+      :root {
+        --bg: oklch(0.1 0.012 255);
+        --surface: oklch(0.16 0.016 255);
+        --line: oklch(0.3 0.018 255);
+        --ink: oklch(0.94 0.008 255);
+        --muted: oklch(0.69 0.02 255);
+        --accent: oklch(0.73 0.13 250);
+        --warn: oklch(0.78 0.15 85);
+        --bad: oklch(0.68 0.18 25);
+        --good: oklch(0.76 0.14 155);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--ink);
+        font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+      header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+      h1 { font-size: 14px; font-weight: 600; margin: 0 12px 0 0; }
+      button, input {
+        font: inherit;
+        color: var(--ink);
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 5px 10px;
+      }
+      button:hover { border-color: var(--accent); cursor: pointer; }
+      input { min-width: 22rem; font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+      #notice {
+        margin: 0 0 12px;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        color: var(--muted);
+        background: var(--surface);
+      }
+      #notice code { color: var(--ink); }
+      #workspace {
+        margin: 0 0 12px;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-left-width: 3px;
+        border-radius: 6px;
+        background: var(--surface);
+        color: var(--muted);
+      }
+      #workspace strong { color: var(--ink); font-weight: 600; }
+      #workspace[data-state="pending"] { border-left-color: var(--accent); }
+      #workspace[data-state="ready"] { border-left-color: var(--good); }
+      #workspace[data-state="degraded"] { border-left-color: var(--warn); color: var(--warn); }
+      #workspace[data-state="failed"] { border-left-color: var(--bad); color: var(--bad); }
+      #grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+        gap: 12px;
+      }
+      .face {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+        overflow: hidden;
+      }
+      .face h2 {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: baseline;
+        margin: 0;
+        padding: 6px 10px;
+        font-size: 12px;
+        font-weight: 600;
+        border-bottom: 1px solid var(--line);
+      }
+      .face h2 span { font-weight: 400; color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+      .face h2 span.state-open { color: var(--good); }
+      .face h2 span.state-connecting { color: var(--accent); }
+      .face h2 span.state-retrying { color: var(--warn); }
+      .face h2 span.state-stopped { color: var(--bad); }
+      .screen { height: 300px; padding: 6px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>AgentCore shell harness</h1>
+      <input id="mint" spellcheck="false" />
+      <button id="connect">Connect all</button>
+      <button id="disconnect">Disconnect all</button>
+      <button id="rotate">New session</button>
+    </header>
+    <p id="notice"></p>
+    <p id="workspace" data-state="pending">workspace: not yet invoked</p>
+    <div id="grid"></div>
+
+    <script type="module">
+      // T-16: proves the shell transport reaches AgentCore from a browser without
+      // the Cube in the way, so a failure has exactly one possible cause.
+      //
+      // `node spike/mint-server.mjs --runtime-arn ...` serves this page, and that is the
+      // only supported way to open it. Being served by the minter makes the page
+      // same-origin with it, so the fetches below carry no Origin header and the minter
+      // never has to echo one back — the alternative (a file:// page, Origin: null) is
+      // an opaque origin that any sandboxed iframe on any site can also claim.
+      import { Terminal } from '/vendor/xterm.mjs';
+      import { FitAddon } from '/vendor/addon-fit.mjs';
+      import { AttachAddon } from '/vendor/addon-attach.mjs';
+      import { createScrollbackStore, createSessionId, createShellTransport } from '/app/transport.js';
+
+      const SESSION_KEY = 'coding-cube.spike.session';
+      const READY_TIMEOUT_MS = 90_000;
+      const params = new URLSearchParams(location.search);
+      const faceCount = Number(params.get('faces') || 6);
+      const mintEndpoint = params.get('mint') || new URL('/mint', location.origin).href;
+      const sessionId = params.get('session') || storedSession();
+
+      const mintInput = document.getElementById('mint');
+      const workspaceLine = document.getElementById('workspace');
+      mintInput.value = mintEndpoint;
+      document.getElementById('notice').innerHTML =
+        `session <code>${sessionId}</code> · minted by <code>${mintEndpoint}</code> · `
+        + 'presigned URLs expire after 300 s and every connection is force-closed at 1 h, '
+        + 'so re-mint and reconnect is the normal path, not the error path.';
+
+      const scrollback = createScrollbackStore({ sessionId });
+      const transport = createShellTransport({
+        sessionId,
+        scrollback,
+        mintUrl: async (shellId, session) => {
+          const url = new URL(mintInput.value);
+          url.searchParams.set('shellId', shellId);
+          url.searchParams.set('sessionId', session);
+          const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+          if (!response.ok) throw new Error(`mint responded ${response.status}`);
+          const body = await response.json();
+          if (!body.url) throw new Error('mint returned no url');
+          return body.url;
+        },
+        // The transport awaits this on every face, so there is no ordering for this page
+        // to get wrong: no shell exists before /mnt/workspace does.
+        ensureWorkspace: () => prepareWorkspace(),
+      });
+
+      // /invocations is what mounts session storage. Shell connections alone never do,
+      // so a face that opens first is a face whose work dies at the idle timeout.
+      async function prepareWorkspace() {
+        const deadline = Date.now() + READY_TIMEOUT_MS;
+        let latest = null;
+        let failure = null;
+        for (let attempt = 0; ; attempt += 1) {
+          // Never silently pending: a workspace that is not answering is the difference
+          // between "slow" and "everything you type tonight is going to evaporate".
+          if (failure) setWorkspace('pending', `retrying after <strong>${failure.message}</strong> — no shells will open until this succeeds`);
+          else if (latest) setWorkspace('pending', `invoking… last state <strong>${latest.state}</strong>`);
+          else setWorkspace('pending', 'invoking /invocations to mount /mnt/workspace…');
+          try {
+            const url = new URL(mintInput.value);
+            url.pathname = url.pathname.replace(/[^/]*$/, 'prepare');
+            url.search = '';
+            url.searchParams.set('sessionId', sessionId);
+            const response = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+            const body = await response.json().catch(() => null);
+            if (!response.ok) throw new Error(body?.error || `prepare responded ${response.status}`);
+            latest = body;
+            failure = null;
+            if (body.state === 'ready') return showWorkspace(body);
+          } catch (error) {
+            failure = error;
+          }
+          if (Date.now() >= deadline) {
+            // A workspace that answered but is still booting is usable — the mount
+            // already exists. One that never answered is not, and must not get shells.
+            if (latest) return showWorkspace({ ...latest, warning: `still ${latest.state} after ${Math.round(READY_TIMEOUT_MS / 1000)}s` });
+            setWorkspace('failed', `workspace never came up: ${failure?.message ?? 'unknown'} — no shells opened, so nothing can be lost`);
+            throw failure ?? new Error('workspace never came up');
+          }
+          await new Promise((resolve) => setTimeout(resolve, Math.min(500 * 2 ** attempt, 4000)));
+        }
+      }
+
+      function showWorkspace(body) {
+        const durable = body.persistence?.durable !== false;
+        const mode = body.persistence?.mode ?? 'unknown';
+        const detail = `state <strong>${body.state}</strong> · storage <strong>${mode}</strong> · `
+          + `${body.faces?.length ?? 0} faces mapped · invoked in ${body.invokedInMs ?? '?'} ms`;
+        if (!durable) setWorkspace('degraded', `${detail} — EPHEMERAL: this workspace is not on session storage and will lose everything at the idle timeout`);
+        else if (body.warning) setWorkspace('degraded', `${detail} — ${body.warning}`);
+        else setWorkspace('ready', `${detail} · /mnt/workspace is mounted, so work survives eviction`);
+        return body;
+      }
+
+      function setWorkspace(state, html) {
+        workspaceLine.dataset.state = state;
+        workspaceLine.innerHTML = `workspace: ${html}`;
+      }
+
+      const faces = [];
+      const grid = document.getElementById('grid');
+      for (let face = 0; face < faceCount; face += 1) faces.push(createFace(face));
+
+      document.getElementById('connect').addEventListener('click', () => faces.forEach(connect));
+      document.getElementById('disconnect').addEventListener('click', () => faces.forEach((entry) => {
+        entry.wanted = false;
+        entry.socket?.close(1000, 'disconnected by hand');
+      }));
+      document.getElementById('rotate').addEventListener('click', () => {
+        localStorage.setItem(SESSION_KEY, createSessionId());
+        location.reload();
+      });
+      new ResizeObserver(() => faces.forEach((entry) => entry.fit.fit())).observe(grid);
+
+      // Start the invocation at load rather than at first connect: the mount should
+      // already exist when the user asks for a shell. Failure is not fatal here — the
+      // gate is not cached on rejection, so Connect all retries it and refuses to open
+      // a shell until it succeeds.
+      transport.workspace.ready().catch(() => {});
+
+      function createFace(face) {
+        const panel = document.createElement('section');
+        panel.className = 'face';
+        panel.innerHTML = `<h2>Face ${face + 1}<span data-shell>${transport.shellIdFor(face)}</span>`
+          + '<span data-state class="state-stopped">idle</span><span data-detail></span><span data-history></span></h2>';
+        const screen = document.createElement('div');
+        screen.className = 'screen';
+        panel.append(screen);
+        grid.append(panel);
+
+        const term = new Terminal({
+          cursorBlink: true,
+          convertEol: true,
+          scrollback: 5000,
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+          fontSize: 12,
+          theme: { background: '#0f1319', foreground: '#e7edf5', cursor: '#64c7e8' },
+        });
+        const fit = new FitAddon();
+        term.loadAddon(fit);
+        term.open(screen);
+        fit.fit();
+        // AgentCore's replay buffer only carries output missed while disconnected, so a
+        // fresh tab would otherwise open on a blank screen and read as "my work is gone".
+        // Restoring happens here, before any socket exists, so live output can never
+        // interleave with history.
+        const restored = transport.restoreInto(term, face);
+        panel.querySelector('[data-history]').textContent = restored
+          ? `restored ${restored.chars} chars from this browser`
+          : 'no local history';
+
+        const entry = {
+          face,
+          term,
+          fit,
+          panel,
+          socket: null,
+          attach: null,
+          wanted: false,
+          attempts: 0,
+          connects: 0,
+        };
+        // 0x04 must ride the resize channel, not the Cube's 8-byte CUBE frame.
+        term.onResize(({ cols, rows }) => entry.socket?.send(transport.encodeResize(cols, rows)));
+        return entry;
+      }
+
+      function connect(entry) {
+        if (entry.socket) return;
+        entry.wanted = true;
+        setState(entry, 'connecting', 'waiting for /invocations, then minting…');
+        const { cols, rows } = entry.term;
+        const socket = transport.openTerminal(entry.face, 0, { cols, rows });
+        entry.socket = socket;
+
+        socket.addEventListener('open', () => {
+          entry.connects += 1;
+          entry.attempts = 0;
+          entry.attach = new AttachAddon(socket);
+          entry.term.loadAddon(entry.attach);
+          entry.fit.fit();
+          // The 101 handshake headers are unreadable from a browser, so the shell
+          // id can only come from the first 0x03 STATUS frame.
+          const terminalId = transport.terminalIdFor(entry.face);
+          setState(entry, 'open', `${socket.reconnected ? 'reconnected' : 'fresh'} · connects ${entry.connects}`
+            + (terminalId ? ` · terminal ${terminalId}` : '')
+            + (socket.bytesDropped ? ` · dropped ${socket.bytesDropped}B` : ''));
+          entry.panel.querySelector('[data-shell]').textContent = socket.shellId;
+        });
+
+        socket.addEventListener('close', (event) => {
+          entry.attach?.dispose();
+          entry.attach = null;
+          entry.socket = null;
+          if (!entry.wanted) {
+            setState(entry, 'stopped', `closed ${event.code}`);
+            return;
+          }
+          // 1011 is the transport's "do not retry": a text frame was sent, or
+          // another client claimed this shell.
+          if (event.code === 1011) {
+            setState(entry, 'stopped', `${event.code} ${event.reason} — not retrying`);
+            entry.term.write(`\r\n\x1b[31mshell stopped: ${event.reason || event.code}\x1b[0m\r\n`);
+            return;
+          }
+          const delay = Math.min(1000 * 2 ** entry.attempts++, 30_000);
+          setState(entry, 'retrying', `${event.code} ${event.reason || ''} · retry in ${Math.ceil(delay / 1000)}s`);
+          setTimeout(() => {
+            if (entry.wanted && !entry.socket) connect(entry);
+          }, delay);
+        });
+      }
+
+      function setState(entry, state, detail) {
+        const label = entry.panel.querySelector('[data-state]');
+        label.textContent = state;
+        label.className = `state-${state}`;
+        entry.panel.querySelector('[data-detail]').textContent = detail || '';
+      }
+
+      function storedSession() {
+        let id = localStorage.getItem(SESSION_KEY);
+        // The session id is the microVM. Losing it on reload strands the old one
+        // and burns another of the ten shells.
+        if (!id) localStorage.setItem(SESSION_KEY, (id = createSessionId()));
+        return id;
+      }
+    </script>
+  </body>
+</html>

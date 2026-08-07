@@ -100,6 +100,12 @@ async function runHerdr(executable, args) {
   return JSON.parse(stdout);
 }
 
+// The only panes /ping may judge. Every other pane in the Herdr server belongs to
+// somebody else's work and must not keep this machine awake.
+export function cubePaneIds(envelope, workspaceLabel = DEFAULT_WORKSPACE) {
+  return selectCubeFaces(envelope, workspaceLabel).map(({ pane }) => pane.pane_id);
+}
+
 export function selectCubeFaces(envelope, workspaceLabel = DEFAULT_WORKSPACE) {
   const snapshot = envelope?.result?.snapshot;
   if (!snapshot) throw new Error('HerdR snapshot is missing');
@@ -125,7 +131,9 @@ export function selectCubeFaces(envelope, workspaceLabel = DEFAULT_WORKSPACE) {
   });
 }
 
-export async function watchHerdrState(executable, onChange, onDisconnect, workspaceLabel = DEFAULT_WORKSPACE) {
+// onEvent receives each event unmodified, because /ping needs the agent_status the
+// 250 ms change debounce throws away.
+export async function watchHerdrState(executable, onChange, onDisconnect, workspaceLabel = DEFAULT_WORKSPACE, onEvent = null) {
   const state = await readHerdrState(executable, workspaceLabel);
   const { stdout } = await execFileAsync(executable, ['--session', 'default', 'status', 'server']);
   const socketPath = stdout.match(/^socket:\s*(.+)$/m)?.[1];
@@ -197,6 +205,7 @@ export async function watchHerdrState(executable, onChange, onDisconnect, worksp
           ready = true;
           resolve();
         } else if (message.event) {
+          onEvent?.(message);
           changed();
         }
       }

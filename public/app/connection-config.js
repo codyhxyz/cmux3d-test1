@@ -1,8 +1,12 @@
 export const DEFAULT_HOST_ADDRESS = '127.0.0.1';
 export const DEFAULT_HOST_PORT = 8064;
 export const DEFAULT_HOST_ORIGIN = `http://${DEFAULT_HOST_ADDRESS}:${DEFAULT_HOST_PORT}`;
-export const DEFAULT_CLOUD_HOST_ORIGIN = 'https://cloud-agent.tail47c266.ts.net';
 export const DEFAULT_WEB_ORIGIN = 'https://codingcube.codyh.xyz';
+// The AgentCore minter runs on loopback and signs one short-lived shell URL at a time.
+// A browser cannot hold AWS credentials, and loopback is the same trust boundary the
+// Tailscale gateway already relies on — so for a single operator this is the entire
+// control plane. Multi-user replaces this origin with an authenticated API, nothing else.
+export const DEFAULT_AGENTCORE_ORIGIN = 'http://127.0.0.1:8787';
 
 export function isLoopbackHostname(hostname) {
   return ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(hostname);

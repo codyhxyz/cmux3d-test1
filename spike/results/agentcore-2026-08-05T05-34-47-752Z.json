@@ -1,0 +1,27 @@
+{
+  "runtimeArn": "arn:aws:bedrock-agentcore:us-east-1:808175385344:runtime/coding_cube_spike-2JI9VQCOZh",
+  "region": "us-east-1",
+  "auth": "both",
+  "signer": "builtin",
+  "ranAt": "2026-08-05T05:34:47.753Z",
+  "results": [
+    {
+      "id": "T-11",
+      "title": "InvokeAgentRuntimeCommandShell in the target region",
+      "verdict": "PASS",
+      "measured": "shell opened in us-east-1 via presign in 2068ms",
+      "attempts": [
+        {
+          "auth": "presign",
+          "ok": true,
+          "elapsedMs": 2068,
+          "shellId": "cube-probe",
+          "reconnected": false
+        }
+      ],
+      "region": "us-east-1",
+      "confirmedShellId": "cube-probe",
+      "elapsedMs": 2451
+    }
+  ]
+}

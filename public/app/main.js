@@ -20,6 +20,7 @@ import { qrSvg } from './qr.js';
 import { startShader } from './shader.js';
 import { momentumDuration, momentumSliderValue, SpaceController } from './space.js';
 import { TerminalFleet } from './terminals.js';
+import { createOriginTransport, createSessionId, createShellTransport } from './transport.js';
 
 const rig = document.getElementById('rig');
 const viewport = document.getElementById('viewport');
@@ -55,13 +56,57 @@ const HANDOFF_KEY = 'coding-cube.handoff';
 // A bounce-back this fast means the host never answered. Declared here because
 // connectHost() runs while this module is still evaluating.
 const HANDOFF_WINDOW_MS = 12_000;
+// One runtimeSessionId per browser, kept across reloads: that id IS the workspace, so
+// minting a fresh one would silently strand the previous machine's files. Declared above
+// the fleet because building its transport reads it during module evaluation.
+const AGENTCORE_SESSION_KEY = 'coding-cube.agentcore.session';
 let connectionState = 'connecting';
 let connectAttempt = 0;
 
+function agentcoreSessionId() {
+  try {
+    const saved = localStorage.getItem(AGENTCORE_SESSION_KEY);
+    if (saved) return saved;
+    const minted = createSessionId('cube-');
+    localStorage.setItem(AGENTCORE_SESSION_KEY, minted);
+    return minted;
+  } catch {
+    // Private browsing: a per-tab workspace is still better than no terminal.
+    return createSessionId('cube-');
+  }
+}
+
+// A host is either an origin the browser can reach directly, or an AgentCore runtime
+// reached through a local minter. Everything else about the Cube is identical.
+function transportForHost(host = activeHost()) {
+  if (host.kind !== 'agentcore') return createOriginTransport(host);
+  const base = host.origin.replace(/\/+$/, '');
+  const sessionId = agentcoreSessionId();
+  const ask = async (path) => {
+    const response = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(20_000) });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      const error = new Error(body?.error || `minter answered ${response.status}`);
+      error.code = body?.code;
+      throw error;
+    }
+    return body;
+  };
+  return createShellTransport({
+    name: host.name,
+    sessionId,
+    mintUrl: async (shellId) => (await ask(`/mint?shellId=${encodeURIComponent(shellId)}&sessionId=${encodeURIComponent(sessionId)}`)).url,
+    // Also returns the face -> terminal_id map, from the same call that materialises
+    // /mnt/workspace. The transport refuses to open a shell until it resolves.
+    ensureWorkspace: () => ask(`/prepare?sessionId=${encodeURIComponent(sessionId)}`),
+  });
+}
+
 const fleet = new TerminalFleet({
   slot: 0,
+  transport: transportForHost(),
   onConnection(open) {
-    // Backgrounding closes every socket on purpose; that is not a lost host.
+    // The health check on return reports background failures without stale UI.
     if (!isPageActive()) return;
     if (!open && connectionState === 'connected') setConnectionState('lost');
     if (open && connectionState !== 'connected') setConnectionState('connected');
@@ -237,7 +282,10 @@ async function connectHost() {
   const attempt = ++connectAttempt;
   const wasConnected = connectionState === 'connected';
   try {
-    if (isLoopbackHost()) desktopShells.href = hostHttp('/');
+    // The cloud's origin is a local minter, not a machine with a gateway on it, so the
+    // loopback affordances below are about "this computer" specifically.
+    const cloud = activeHost().kind === 'agentcore';
+    if (!cloud && isLoopbackHost()) desktopShells.href = hostHttp('/');
     const plan = connectionPlan();
     if (plan.type === 'mixed-content') {
       hostDirect.href = plan.directUrl;
@@ -260,26 +308,48 @@ async function connectHost() {
 
     // Re-probing a working host should not flash a failure before it resolves.
     if (!wasConnected) setConnectionState('connecting');
-    const response = await fetch(hostHttp('/health'), { signal: AbortSignal.timeout(3000) });
+    // The cloud serves no /health — its origin is a minter, and the only honest liveness
+    // question is whether it will actually sign a shell URL. Asking the transport also
+    // means each one owns its own reachability rather than main.js guessing.
+    const probe = cloud
+      ? await fleet.transport.probe()
+      : await fetch(hostHttp('/health'), { signal: AbortSignal.timeout(3000) })
+        .then((response) => ({ ok: response.ok, reason: response.status === 401 ? 'unauthorized' : 'unreachable' }));
     if (attempt !== connectAttempt) return;
-    if (response.status === 401) {
+    if (probe.reason === 'unauthorized') {
       setConnectionState('unpaired');
       showMessage('That computer needs a pairing code. Copy the one printed by npm start.');
       return;
     }
-    if (!response.ok) throw new Error('unreachable');
+    if (!probe.ok) throw new Error(probe.reason || 'unreachable');
 
     markConnected();
     setConnectionState('connected');
     showMessage('');
     fleet.attach();
     herdrEvents?.close();
-    herdrEvents = new EventSource(hostHttp('/api/herdr/events'));
-    herdrEvents.addEventListener('message', refreshHerdrState);
+    // Herdr state rides the gateway's SSE stream. The cloud reports through /invocations
+    // instead, so there is nothing here to subscribe to.
+    if (!cloud) {
+      herdrEvents = new EventSource(hostHttp('/api/herdr/events'));
+      herdrEvents.addEventListener('message', refreshHerdrState);
+    }
     renderSavedHosts();
     refreshPairingCode();
-  } catch {
-    if (attempt === connectAttempt) setConnectionState(wasConnected ? 'lost' : 'unpaired');
+  } catch (error) {
+    if (attempt !== connectAttempt) return;
+    setConnectionState(wasConnected ? 'lost' : 'unpaired');
+    // A cloud failure has a cause the user cannot possibly guess, and saying nothing
+    // turns it into six terminals retrying forever. But most people who ever see this
+    // are someone the link was shared with, not the operator — so name what is missing,
+    // not the port it would have been on. "Failed to fetch" is what a browser reports
+    // both when the helper is absent and when it refuses to reach loopback at all.
+    if (activeHost().kind === 'agentcore') {
+      const unreachable = /failed to fetch|networkerror|load failed/i.test(error.message);
+      showMessage(unreachable
+        ? 'The cloud runs from a helper on the computer that owns it, so it is not available in this browser.'
+        : `Cloud unavailable: ${error.message}`);
+    }
   }
 }
 
@@ -312,6 +382,7 @@ function switchHost(origin, options) {
   const host = setActiveHost(origin, options);
   if (host && host.origin !== previous) {
     fleet.detach();
+    fleet.setTransport(transportForHost(host));
     herdrEvents?.close();
     herdrEvents = null;
   }
@@ -327,7 +398,7 @@ const WATCH_FOR_MS = 5 * 60_000;
 let watchingUntil = 0;
 
 function watchForHost(durationMs = WATCH_FOR_MS) {
-  if (!isLoopbackHost()) return;
+  if (activeHost().kind === 'agentcore' || !isLoopbackHost()) return;
   const alreadyWatching = watchingUntil > Date.now();
   watchingUntil = Math.max(watchingUntil, Date.now() + durationMs);
   if (alreadyWatching) return;
@@ -395,11 +466,16 @@ async function refreshPairingCode() {
 // one from the list, which is the only mental model the panel needs to teach.
 function renderSavedHosts() {
   const current = activeHost().origin;
-  // Loopback on a custom port and the default entry are the same machine, so the
-  // list would otherwise show "This computer" twice.
-  const seen = listHosts().filter((host) => {
-    if (!isLoopbackHost(host.origin) || host.origin === current) return true;
-    return !listHosts().some((other) => isLoopbackHost(other.origin) && other.origin === current);
+  const hosts = listHosts();
+  // Loopback on a custom port and the default entry are the same machine, so the list
+  // would otherwise show "This computer" twice. The cloud's origin is a local minter
+  // rather than a machine you could open a terminal on, so it is never that duplicate —
+  // without this the two loopback entries hide each other, whichever one is selected.
+  const sameMachine = (host) => host.kind !== 'agentcore' && isLoopbackHost(host.origin);
+  const currentIsSameMachine = hosts.some((host) => sameMachine(host) && host.origin === current);
+  const seen = hosts.filter((host) => {
+    if (!sameMachine(host) || host.origin === current) return true;
+    return !currentIsSameMachine;
   });
   connectSaved.replaceChildren(...seen.map((host) => {
     const active = host.origin === current;
@@ -409,7 +485,10 @@ function renderSavedHosts() {
     const use = document.createElement('button');
     use.type = 'button';
     use.setAttribute('aria-current', String(active));
-    use.innerHTML = `<i></i><span><strong>${host.name}</strong><small>${host.origin.replace(/^https?:\/\//, '')}</small></span>`
+    // The cloud's origin is the local minter's port. Showing it would be both meaningless
+    // and wrong: it is not where the terminals are, and infrastructure is not the product.
+    const subtitle = host.kind === 'agentcore' ? 'sleeps when idle' : host.origin.replace(/^https?:\/\//, '');
+    use.innerHTML = `<i></i><span><strong>${host.name}</strong><small>${subtitle}</small></span>`
       + `<em>${active ? connectionLabel() : lastSeen(host)}</em>`;
     use.addEventListener('click', () => {
       if (active) {

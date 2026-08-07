@@ -1,0 +1,23 @@
+# Seeded to /opt/seed/home/.config/herdr/config.toml and copied onto the session
+# storage mount on first boot only, so a user's later edits survive a redeploy.
+
+# A headless server has nobody to answer first-run notification setup.
+onboarding = false
+
+[terminal]
+# $SHELL is unset for a server spawned by the gateway, and herdr's fallback is
+# /bin/sh. Name the shell the image actually ships.
+default_shell = "/bin/bash"
+
+[session]
+resume_agents_on_restore = true
+
+[experimental]
+# Defaults to false. With it, reattaching to a pane replays that pane's screen
+# instead of showing a blank one — measured, 47 KB on reattach, marker present.
+# It does NOT survive a herdr restart: pane content is held in memory, session.json
+# stores only layout/cwd/ids, and nothing else on disk is large enough to hold
+# scrollback. So an AgentCore eviction still returns six blank terminals, and the
+# thing that actually gives a user their screen back across a wake is the
+# browser-local scrollback store in public/app/transport.js.
+pane_history = true

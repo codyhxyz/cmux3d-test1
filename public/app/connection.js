@@ -1,5 +1,5 @@
 import {
-  DEFAULT_CLOUD_HOST_ORIGIN,
+  DEFAULT_AGENTCORE_ORIGIN,
   DEFAULT_HOST_ORIGIN,
   DEFAULT_WEB_ORIGIN,
   isLoopbackHostname,
@@ -12,9 +12,13 @@ const STORE_KEY = 'coding-cube.hosts.v1';
 const LEGACY_PREFIX = ['cmux', '3d'].join('');
 const LEGACY_STORE_KEY = `${LEGACY_PREFIX}.hosts.v1`;
 const LEGACY_TOKEN_KEY = `${LEGACY_PREFIX}-token`;
+// `kind` selects the transport, not the address: an agentcore host's origin is a local
+// minter that signs shell URLs, so nothing about it is reachable the way the others are.
+// There is exactly one cloud. The always-on Tailscale box it replaced is deliberately not
+// built in any more — anyone who paired one still has it in their saved hosts.
 const BUILT_IN_HOSTS = {
-  [DEFAULT_CLOUD_HOST_ORIGIN]: { origin: DEFAULT_CLOUD_HOST_ORIGIN, name: 'Cloud Agent', token: '', builtIn: true },
-  [DEFAULT_HOST_ORIGIN]: { origin: DEFAULT_HOST_ORIGIN, name: 'This computer', token: '', builtIn: true },
+  [DEFAULT_AGENTCORE_ORIGIN]: { origin: DEFAULT_AGENTCORE_ORIGIN, name: 'Cloud', token: '', kind: 'agentcore', builtIn: true },
+  [DEFAULT_HOST_ORIGIN]: { origin: DEFAULT_HOST_ORIGIN, name: 'This computer', token: '', kind: 'origin', builtIn: true },
 };
 
 export const hosted = location.origin === DEFAULT_WEB_ORIGIN;
@@ -98,7 +102,7 @@ function hostUrl(path) {
 }
 
 function defaultOrigin() {
-  return hosted ? DEFAULT_CLOUD_HOST_ORIGIN : location.origin;
+  return hosted ? DEFAULT_AGENTCORE_ORIGIN : location.origin;
 }
 
 function hostName(origin) {
@@ -139,8 +143,25 @@ function readStore() {
     const parsed = JSON.parse(current || legacy || '');
     if (parsed?.version !== 1 || !parsed.hosts) return empty;
     const hosts = { ...BUILT_IN_HOSTS, ...parsed.hosts };
-    for (const [origin, builtIn] of Object.entries(BUILT_IN_HOSTS)) hosts[origin] = { ...builtIn, ...hosts[origin], builtIn: true };
+    // Identity comes from this build, not from a copy saved before a rename: a stored
+    // "Cloud (AgentCore)" must not outlive the product deciding to call it "Cloud".
+    // Only what the user earned — their token and history — survives from storage.
+    for (const [origin, builtIn] of Object.entries(BUILT_IN_HOSTS)) {
+      hosts[origin] = {
+        ...hosts[origin],
+        ...builtIn,
+        token: hosts[origin]?.token || builtIn.token,
+        addedAt: hosts[origin]?.addedAt || Date.now(),
+        lastConnected: hosts[origin]?.lastConnected || 0,
+      };
+    }
+    // A host that used to be built in and no longer is was retired by an update, not
+    // added by hand. Drop it, or the box AgentCore replaced haunts the list forever.
+    for (const [origin, host] of Object.entries(hosts)) {
+      if (host.builtIn && !BUILT_IN_HOSTS[origin]) delete hosts[origin];
+    }
     const migrated = { ...empty, ...parsed, hosts };
+    if (!hosts[migrated.activeOrigin]) migrated.activeOrigin = '';
     if (legacy) {
       localStorage.setItem(STORE_KEY, JSON.stringify(migrated));
       localStorage.removeItem(LEGACY_STORE_KEY);

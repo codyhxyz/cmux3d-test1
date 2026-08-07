@@ -1,7 +1,18 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { VENDOR_ASSETS } from '../vendor-assets.js';
-import { allowCors, requestAuthorized, trustedForSecrets } from './origin.js';
+import { allowCors, requestAuthorized, requestIsRemote, trustedForSecrets } from './origin.js';
+
+const INVOCATION_LIMIT = 1024 * 1024;
+const FACE_ROUTE = /^\/internal\/face\/(\d+)$/;
+
+// agentcore.js installs these; index.js never does, so the local, --expose and
+// Tailscale hosts keep exactly the surface they have today.
+let agentCore = null;
+
+export function setAgentCoreRoutes(routes) {
+  agentCore = routes;
+}
 
 const contentTypes = new Map([
   ['.html', 'text/html; charset=utf-8'],
@@ -41,12 +52,17 @@ export function createStaticResponder(publicRoot, readHerdrState, watchHerdrStat
       res.end();
       return;
     }
-    if (!['GET', 'HEAD'].includes(req.method || 'GET')) {
+    const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    const invocation = Boolean(agentCore) && req.method === 'POST' && requestUrl.pathname === '/invocations';
+    if (!['GET', 'HEAD'].includes(req.method || 'GET') && !invocation) {
       sendText(res, 405, 'method not allowed');
       return;
     }
 
-    const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    // The AgentCore contract routes answer before the pairing gate on purpose: the
+    // platform is the authenticator, and it cannot present a pairing code.
+    if (agentCore && await serveAgentCore(req, res, requestUrl)) return;
+
     if (needsPairing(requestUrl.pathname) && !(await requestAuthorized(req, requestUrl, { webOrigin, token, exposure, tailnet }))) {
       sendText(res, 401, 'pairing required');
       return;
@@ -149,6 +165,59 @@ export function createStaticResponder(publicRoot, readHerdrState, watchHerdrStat
       sendText(res, 404, 'not found');
     }
   };
+}
+
+async function serveAgentCore(req, res, requestUrl) {
+  const face = FACE_ROUTE.exec(requestUrl.pathname);
+  if (requestUrl.pathname !== '/ping' && requestUrl.pathname !== '/invocations' && !face) return false;
+
+  // A 500 keeps the microVM alive to be debugged; an unanswered request looks to
+  // AgentCore like a container that has stopped responding at all.
+  try {
+    if (requestUrl.pathname === '/ping') sendJson(res, 200, agentCore.ping());
+    else if (face) {
+      // cube-wait-face runs inside this microVM. Nothing outside it gets to ask
+      // where a face lives, so this route needs no credential of its own.
+      if (requestIsRemote(req)) sendText(res, 403, 'forbidden');
+      else sendJson(res, 200, await agentCore.face(Number(face[1])));
+    } else {
+      let body;
+      try {
+        body = await readJson(req);
+      } catch (error) {
+        sendJson(res, 400, { error: error.message });
+        return true;
+      }
+      sendJson(res, 200, await agentCore.invoke(body));
+    }
+  } catch (error) {
+    sendJson(res, 500, { error: error.message });
+  }
+  return true;
+}
+
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length <= INVOCATION_LIMIT) return;
+      reject(new Error('invocation body too large'));
+      req.destroy();
+    });
+    req.on('error', reject);
+    req.on('end', () => {
+      if (!body.trim()) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(body));
+      } catch {
+        reject(new Error('invocation body is not JSON'));
+      }
+    });
+  });
 }
 
 function isInside(root, filePath) {
