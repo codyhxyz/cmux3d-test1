@@ -181,6 +181,11 @@ export async function presignUrl({ url, region, sessionId, expiresIn = MAX_PRESI
 
 // SigV4 header auth: the server-side path, and the fallback if the presigned URL is
 // rejected. Also used for /invocations and StopRuntimeSession.
+//
+// `raw` is the same choice presignUrl() offers and exists for the same reason: a Cloudflare
+// Worker has no node and cannot afford @smithy, but it can run crypto.subtle. Both branches
+// are diffed against each other in infra/verify.mjs, so picking one is a performance and
+// dependency decision rather than a correctness one.
 export async function signRequest({
   method = 'GET',
   url,
@@ -189,10 +194,14 @@ export async function signRequest({
   headers = {},
   body,
   credentials,
+  signer: signerKind = 'aws-sdk',
   date = new Date(),
 }) {
   const target = new URL(url);
   const resolved = credentials ?? (await resolveCredentials());
+  if (signerKind !== 'aws-sdk') {
+    return signHeadersRaw({ method, target, region, service, headers, body, credentials: resolved, date });
+  }
   const signer = await awsSigner({ service, region, credentials: resolved });
   const signed = await signer.sign({
     method,
@@ -204,6 +213,38 @@ export async function signRequest({
     body,
   }, { signingDate: date });
   return signed.headers;
+}
+
+// Header auth on crypto.subtle alone. x-amz-content-sha256 is optional for non-S3 services,
+// but @smithy sends and signs it, and @smithy is the oracle this is diffed against — so it
+// is included here to make the two byte-identical rather than merely both acceptable.
+async function signHeadersRaw({ method, target, region, service, headers, body, credentials, date }) {
+  const payload = body === undefined || body === null ? '' : (typeof body === 'string' ? body : JSON.stringify(body));
+  const { longDate, shortDate } = formatDate(date);
+  const scope = `${shortDate}/${region}/${service}/aws4_request`;
+
+  const signable = new Map();
+  for (const [name, value] of Object.entries(headers)) {
+    if (value !== undefined && value !== null) signable.set(name.toLowerCase(), String(value).trim());
+  }
+  const payloadHash = payload ? await sha256Hex(payload) : EMPTY_BODY_SHA256;
+  signable.set('host', target.host);
+  signable.set('x-amz-date', longDate);
+  signable.set('x-amz-content-sha256', payloadHash);
+  if (credentials.sessionToken) signable.set('x-amz-security-token', credentials.sessionToken);
+
+  const names = [...signable.keys()].sort();
+  const canonicalHeaders = names.map((name) => `${name}:${signable.get(name)}\n`).join('');
+  const signedHeaders = names.join(';');
+  const canonicalQuery = canonicalQueryString(new Map([...target.searchParams.entries()]));
+
+  const canonicalRequest = [method, canonicalUri(target.pathname), canonicalQuery, canonicalHeaders, signedHeaders, payloadHash].join('\n');
+  const stringToSign = ['AWS4-HMAC-SHA256', longDate, scope, await sha256Hex(canonicalRequest)].join('\n');
+  const signature = toHex(await signingKey(credentials.secretAccessKey, shortDate, region, service, stringToSign));
+
+  const wire = Object.fromEntries(names.map((name) => [name, signable.get(name)]));
+  wire.authorization = `AWS4-HMAC-SHA256 Credential=${credentials.accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+  return wire;
 }
 
 async function presignQuery({ method, host, path, query, region, service, credentials, expiresIn, date }) {

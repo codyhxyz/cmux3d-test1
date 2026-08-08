@@ -9,7 +9,7 @@ import WebSocket from 'ws';
 import { HandController, handSample } from '../public/app/hand-tracking.js';
 import { herdrMetadata } from '../public/app/herdr.js';
 import { accessoryKeyInput, commandKeyInput, commandPromptDirection, ctrlCode, promptLine } from '../public/app/terminal-keys.js';
-import { DEFAULT_AGENTCORE_ORIGIN, mixedContentBlocked, normalizeHostOrigin, pairingUrl, parseFragment } from '../public/app/connection-config.js';
+import { DEFAULT_AGENTCORE_ORIGIN, DEFAULT_WEB_ORIGIN, mixedContentBlocked, normalizeHostOrigin, pairingUrl, parseFragment } from '../public/app/connection-config.js';
 import {
   encodeResize as encodeProtocolResize,
   encodeStdin as encodeProtocolStdin,
@@ -155,7 +155,11 @@ assert.notEqual(rotateToken(tokenEnv), firstToken, 'rotating should invalidate t
 assert.equal(readServerOptions({ ...tokenEnv, CODING_CUBE_TOKEN: 'from-env' }, []).token, 'from-env', 'an explicit token should win over the stored one');
 await rm(tokenDir, { recursive: true, force: true });
 
-assert.equal(DEFAULT_AGENTCORE_ORIGIN, 'http://127.0.0.1:8787', 'the hosted cube should reach its cloud through the local minter without pairing');
+// The cloud is served from the hosted origin itself, as Pages Functions, so from the hosted
+// page it is same-origin. That is the whole property: an https page cannot fetch loopback at
+// all, so any cloud address on 127.0.0.1 makes the website a decoration and the real cube
+// something you have to start a process to reach.
+assert.equal(DEFAULT_AGENTCORE_ORIGIN, DEFAULT_WEB_ORIGIN, 'the hosted cube must reach its cloud on its own origin, never through a process on somebody’s machine');
 assert.doesNotMatch(await readFile('public/app/connection.js', 'utf8'), /tail47c266/, 'the always-on box AgentCore replaced must not come back as a second cloud');
 // `npm start` with CUBE_RUNTIME_ARN serves the Cube and the minter on one origin, so a
 // page it served must ask itself. Measured: without this the page on :8064 fetched

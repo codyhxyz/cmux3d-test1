@@ -1,5 +1,5 @@
 import { isPageActive, onPageActivity } from './activity.js';
-import { DEFAULT_HOST_ORIGIN, pairingUrl, parseFragment } from './connection-config.js';
+import { DEFAULT_WEB_ORIGIN, pairingUrl, parseFragment } from './connection-config.js';
 import {
   activeHost,
   connectionPlan,
@@ -119,9 +119,11 @@ async function resolveCloudBase(fallback) {
   try {
     const response = await fetch('/session', { signal: AbortSignal.timeout(5000) });
     // Checked on the body, not the status: a static host that answers unknown paths
-    // with its index page would otherwise look like a minter.
-    const body = response.ok ? await response.json().catch(() => null) : null;
-    if (body?.runtimeArn) return (cloudBase = location.origin);
+    // with its index page would otherwise look like a minter. `minter` is how a refusal
+    // still identifies itself — a deployment missing its AWS secrets is this origin's
+    // problem to report, and looking elsewhere for the API would bury that.
+    const body = await response.json().catch(() => null);
+    if (body?.runtimeArn || body?.minter) return (cloudBase = location.origin);
   } catch {
     // Not served by a minter. Fall through to whatever the saved host names.
   }
@@ -400,20 +402,6 @@ async function connectHost() {
     const cloud = activeHost().kind === 'agentcore';
     // A declined wake is a decision, not a transient failure; only clearCancel() undoes it.
     if (cloud && cloudCancelled) return;
-    // Chrome 151 refuses any secure page's request into the loopback address space
-    // ("Permission was denied for this request to access the `loopback` address space"),
-    // and Access-Control-Allow-Private-Network no longer exempts it. So a hosted page can
-    // never reach the gateway that mints shell URLs — not a failure to retry, a place the
-    // request cannot go. Mixed-content already has this shape, but loopback is exempt from
-    // that check, so the cloud slips past it into a fetch that cannot succeed. Offer the
-    // address it does live at, the same way the mixed-content branch does.
-    if (cloud && location.protocol === 'https:') {
-      hostDirect.href = `${DEFAULT_HOST_ORIGIN}/`;
-      hostDirect.hidden = false;
-      setConnectionState('unpaired');
-      showMessage(`Your cloud runs on this computer, at ${DEFAULT_HOST_ORIGIN.replace(/^https?:\/\//, '')}. A secure page is not allowed to reach it, so open it there.`);
-      return;
-    }
     if (!cloud && isLoopbackHost()) desktopShells.href = hostHttp('/');
     const plan = connectionPlan();
     if (plan.type === 'mixed-content') {
@@ -469,18 +457,17 @@ async function connectHost() {
   } catch (error) {
     if (attempt !== connectAttempt) return;
     setConnectionState(wasConnected ? 'lost' : 'unpaired');
-    // A cloud failure has a cause the user cannot possibly guess, and saying nothing
-    // turns it into six terminals retrying forever. But most people who ever see this
-    // are someone the link was shared with, not the operator — so name what is missing,
-    // not the port it would have been on. "Failed to fetch" is what a browser reports
-    // both when the helper is absent and when it refuses to reach loopback at all.
+    // A cloud failure has a cause the user cannot possibly guess, and saying nothing turns it
+    // into six terminals retrying forever. The minting API is served from the hosted origin
+    // now, so an unreachable one means this page is not that origin — a local copy, or one
+    // opened from a file — rather than a helper somebody forgot to start.
     if (activeHost().kind === 'agentcore') {
       const unreachable = /failed to fetch|networkerror|load failed/i.test(error.message);
       const message = unreachable
-        ? 'The cloud runs from a helper on the computer that owns it, so it is not available in this browser.'
+        ? `The cloud is served from ${DEFAULT_WEB_ORIGIN.replace(/^https?:\/\//, '')}. Open it there — this page cannot reach it.`
         : `Cloud unavailable: ${error.message}`;
       showMessage(message);
-      lifecycle.update({ error: { message, auth: /aws login/i.test(error.message) } });
+      lifecycle.update({ error: { message, auth: /aws login|refusing/i.test(error.message) } });
     }
   }
 }

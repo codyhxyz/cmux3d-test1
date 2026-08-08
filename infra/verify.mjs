@@ -85,6 +85,24 @@ for (const credentials of credentialSets) {
     const proven = await provenSign(args);
     assert.equal(signHeaders(args).authorization, proven.authorization ?? proven.Authorization);
   });
+  // The Worker path. site/lib/cloud.js signs /invocations with signer:'raw' because a
+  // Cloudflare Function has no node and cannot carry @smithy, so the crypto.subtle branch has
+  // to produce the same bytes as the branch that was proven against the live service.
+  await check(`signRequest signer:'raw' matches the @smithy branch (${label})`, async () => {
+    const args = {
+      method: 'POST',
+      url: buildInvocationsUrl({ region: REGION, runtimeArn: ALICE_RUNTIME }),
+      region: REGION,
+      service: 'bedrock-agentcore',
+      headers: { 'content-type': 'application/json', accept: 'application/json', 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': `cube-default-${ALICE}` },
+      body: JSON.stringify({ op: 'state', faces: 6 }),
+      credentials,
+      date,
+    };
+    const proven = await provenSign(args);
+    const raw = await provenSign({ ...args, signer: 'raw' });
+    assert.equal(raw.authorization, proven.authorization ?? proven.Authorization);
+  });
 }
 
 await check('a presigned URL expiring beyond the 300s service maximum is refused', () => {

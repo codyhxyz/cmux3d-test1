@@ -34,7 +34,25 @@ tabs when missing. Existing faces and unrelated workspaces or tabs are left alon
 
 The six faces can run on an AWS Bedrock AgentCore runtime instead of this machine —
 files on EFS at `/mnt/workspace`, compute billed only while it is awake, and the whole
-cube asleep when it is idle. One command:
+cube asleep when it is idle.
+
+Nothing to run. Open <https://codingcube.codyh.xyz>, sign in at the Cloudflare Access
+prompt, and pick **Cloud** in Computers.
+
+The minting API is served from that origin as Cloudflare Pages Functions
+(`site/functions/`), so the page and the thing that signs its shells are the same origin.
+That is not a convenience: a browser cannot hold AWS credentials, so something
+server-side has to sign one short-lived shell URL per face per reconnect, and an `https`
+page cannot fetch `127.0.0.1` at all. Any design where the signer lives on your laptop
+makes the website a decoration.
+
+Configuring a deployment is [`site/README.md`](site/README.md) — one Access application
+and three secrets.
+
+### Running the minter locally instead
+
+`npm start` with a runtime ARN still serves the same three endpoints on `127.0.0.1:8064`,
+which is the path to use when changing them:
 
 ```bash
 CUBE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-east-1:808175385344:runtime/coding_cube_nat-3RJI162JL3 \
@@ -42,17 +60,10 @@ CUBE_AWS_PROFILE=coding-cube \
 npm start
 ```
 
-Open <http://127.0.0.1:8064/> and pick **Cloud (AgentCore)** in Computers. Put those two
-exports in your shell profile and it is just `npm start`.
-
-`CUBE_RUNTIME_ARN` is the whole switch: without it there is no `/mint` endpoint and
-nothing about the local cube changes. `npm run cloud` is the same thing with a loud
-error instead of a silent local start when the ARN is missing.
-
-The Cube and the minting API are served from **one origin** on purpose. A browser cannot
-hold AWS credentials, so the server signs one short-lived shell URL per face per
-reconnect — and Chrome now refuses an `https` page's fetch to `127.0.0.1` outright, so
-the page has to come from the same place as the API rather than reaching across to it.
+A page served from there mints from its own origin rather than the hosted one — see
+`resolveCloudBase()` — so a local minter always wins over the deployed one while it is
+running. `npm run cloud` is the same thing with a loud error instead of a silent local
+start when the ARN is missing.
 
 ### The AWS profile
 
