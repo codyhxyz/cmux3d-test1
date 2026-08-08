@@ -17,23 +17,10 @@ REGION="${CUBE_REGION:-us-east-1}"
 ACCOUNT="${CUBE_ACCOUNT:-808175385344}"
 TABLE="${CUBE_TABLE:-coding-cube-workspaces}"
 
-DRY_RUN=0
-case "${1:-}" in
-  --dry-run|--plan) DRY_RUN=1 ;;
-  '') ;;
-  *) printf 'usage: %s [--dry-run]\n' "$0" >&2; exit 2 ;;
-esac
-
-say() { printf '\033[36m>\033[0m %s\n' "$1"; }
-die() { printf '\033[31mx\033[0m %s\n' "$1" >&2; exit 1; }
-run() { printf '\033[35m$\033[0m %s\n' "$*" >&2; "$@"; }
-aws_() { aws --region "$REGION" "$@"; }
-
-command -v aws >/dev/null 2>&1 || die 'the aws cli is not installed'
-CALLER=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) \
-  || die 'no usable AWS credentials'
-[ "$CALLER" = "$ACCOUNT" ] \
-  || die "credentials are for account $CALLER but this script targets $ACCOUNT"
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$HERE/aws-common.sh"
+aws_common_parse_dry_run "$@"
+aws_verify_account
 
 EXISTS=0
 aws_ dynamodb describe-table --table-name "$TABLE" >/dev/null 2>&1 && EXISTS=1

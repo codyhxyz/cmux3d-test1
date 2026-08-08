@@ -1,3 +1,5 @@
+import { DEFAULT_FACE_COUNT } from './face-count.js';
+
 // A workspace waking from sleep and a workspace that is broken look identical when the
 // only feedback is six terminals retrying. This module owns the one question the
 // interface has to answer out loud — what is this workspace doing, and what can I do
@@ -12,7 +14,6 @@ export const ELAPSED_AFTER_MS = 5_000;
 // Cold start was measured at 1342 ms. Anything still waking after this is not slow, it is
 // stuck, and continuing to call it "Waking" is the endless spinner the plan forbids.
 export const STUCK_AFTER_MS = 90_000;
-const FACE_COUNT = 6;
 const DETAIL_REFRESH_MS = 15_000;
 
 // Plan section 6. Every state carries its own words and its own way out.
@@ -61,7 +62,7 @@ export function deriveWorkspaceState({
   workspace = null,
   busy = null,
   faces = 0,
-  faceCount = FACE_COUNT,
+  faceCount = DEFAULT_FACE_COUNT,
   elapsedMs = 0,
   error = null,
   everStarted = false,
@@ -83,7 +84,7 @@ export function deriveWorkspaceState({
 
   const phase = typeof workspace?.phase === 'string' ? workspace.phase : null;
   const ready = workspace?.ready ?? workspace?.state === 'ready';
-  // A workspace with all six faces live is not waking, whatever else is in flight. The
+  // A workspace with every configured face live is not waking, whatever else is in flight. The
   // detail refresh is an /invocations call on exactly that workspace, so without this
   // an open Computers popover repaints a healthy cube as "Waking… Cancel" every 15s.
   const attached = connection === 'connected' && faces >= faceCount;
@@ -108,7 +109,7 @@ export function deriveWorkspaceState({
   if (connection === 'connected' && ready !== false) {
     const working = workingPanes(busy, workspace?.faces);
     if (working.length) return state('working', { detail: agentDetail(working), note: agentNote(working) });
-    return state('ready', { detail: 'All six terminals are attached.' });
+    return state('ready', { detail: `All ${faceCount} terminals are attached.` });
   }
   return state('sleeping', {
     detail: everStarted
@@ -201,7 +202,7 @@ export function createWorkspaceLifecycle({
   detailMs = DETAIL_REFRESH_MS,
   elapsedAfterMs = ELAPSED_AFTER_MS,
 } = {}) {
-  let input = { cloud: false, connection: 'connecting', faceCount: FACE_COUNT };
+  let input = { cloud: false, connection: 'connecting', faceCount: DEFAULT_FACE_COUNT };
   let current = deriveWorkspaceState(input);
   // When the current wait began, held separately from the state so that escalating a
   // stuck wake to Needs attention does not reset the clock and flip straight back.

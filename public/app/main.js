@@ -93,6 +93,7 @@ const lifecycle = createWorkspaceLifecycle({
   onChange: renderLifecycle,
   refresh: () => refreshWorkspace?.(),
 });
+lifecycle.update({ faceCount });
 
 function agentcoreSessionId() {
   try {
@@ -159,8 +160,8 @@ function transportForHost(host = activeHost()) {
       const report = await ask(`/prepare?sessionId=${encodeURIComponent(sessionId)}&faces=${faceCount}`);
       // `busy` is the container's own report of which panes hold a working agent. A
       // minter that does not forward it leaves that unproven rather than assumed.
-      lifecycle.update({ preparing: false, everStarted: true, workspace: report, busy: report?.busy ?? null });
       adoptServedFaceCount(report);
+      lifecycle.update({ preparing: false, everStarted: true, workspace: report, busy: report?.busy ?? null });
       return report;
     } catch (error) {
       lifecycle.update({ preparing: false, error: { message: error.message, auth: error.code === 'AWS_LOGIN_REQUIRED' } });
@@ -170,7 +171,7 @@ function transportForHost(host = activeHost()) {
   refreshWorkspace = () => prepare().catch(() => {
     // The lifecycle already carries the failure; a rejected refresh has nothing to add.
   });
-  lifecycle.update({ cloud: true, cancelled: false, error: null, workspace: null, busy: null, faces: 0 });
+  lifecycle.update({ cloud: true, cancelled: false, error: null, workspace: null, busy: null, faces: 0, faceCount });
 
   return createShellTransport({
     name: host.name,
@@ -190,7 +191,7 @@ const fleet = new TerminalFleet({
   slot: 0,
   transport: transportForHost(),
   onConnection(open) {
-    // How many of the six are actually live is what separates "Waking · Opening
+    // How many configured faces are actually live is what separates "Waking · Opening
     // terminals…" from "Ready", and it costs no extra call to know.
     lifecycle.update({ faces: open });
     // The health check on return reports background failures without stale UI.
@@ -436,13 +437,9 @@ async function connectHost() {
 
     // Re-probing a working host should not flash a failure before it resolves.
     if (!wasConnected) setConnectionState('connecting');
-    // The cloud serves no /health — its origin is a minter, and the only honest liveness
-    // question is whether it will actually sign a shell URL. Asking the transport also
-    // means each one owns its own reachability rather than main.js guessing.
-    const probe = cloud
-      ? await fleet.transport.probe()
-      : await fetch(hostHttp('/health'), { signal: AbortSignal.timeout(3000) })
-        .then((response) => ({ ok: response.ok, reason: response.status === 401 ? 'unauthorized' : 'unreachable' }));
+    // Each transport owns its own honest reachability question: /health for an origin,
+    // or whether the AgentCore minter can actually sign a shell URL for the cloud.
+    const probe = await fleet.transport.probe();
     if (attempt !== connectAttempt) return;
     if (probe.reason === 'unauthorized') {
       setConnectionState('unpaired');
@@ -687,7 +684,7 @@ function renderSavedHosts() {
       : host.origin.replace(/^https?:\/\//, '');
     const activity = cloud
       ? describeActivity({ cloud: true, connection: active ? connectionState : 'idle', lastConnected: host.lastConnected })
-      : (active ? connectionLabel() : lastSeen(host));
+      : (active ? connectionLabel() : describeActivity({ cloud: false, connection: 'idle', lastConnected: host.lastConnected }));
     use.innerHTML = `<i${life?.tone ? ` data-tone="${life.tone}"` : ''}></i>`
       + `<span><strong>${host.name}</strong><small>${subtitle}</small>`
       + `${life?.note ? `<small class="host-note">${escapeHtml(life.note)}</small>` : ''}</span>`
@@ -732,15 +729,6 @@ function escapeHtml(text) {
 
 function connectionLabel() {
   return { connected: 'connected', connecting: 'connecting…', lost: 'reconnecting…', unpaired: 'select to connect' }[connectionState];
-}
-
-function lastSeen(host) {
-  if (!host.lastConnected) return '';
-  const minutes = Math.floor((Date.now() - host.lastConnected) / 60_000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
 }
 
 // The prism's shape is data: styles.css owns the transforms and each panel carries
@@ -821,12 +809,16 @@ function rememberFaceCount(count) {
 // still awaiting, and rebuilding the fleet underneath it would strand that open.
 function adoptServedFaceCount(report) {
   const served = Array.isArray(report?.faces) ? report.faces.length : 0;
-  if (!served || served === faceCount) return;
-  setTimeout(() => applyFaceCount(served, { persist: false }), 0);
+  if (!served) return;
+  // Lifecycle truth changes with the gateway response, before the deferred DOM/fleet
+  // rebuild: six open sockets must not briefly make a ten-face workspace look Ready.
+  lifecycle.update({ faceCount: served });
+  if (served !== faceCount) setTimeout(() => applyFaceCount(served, { persist: false }), 0);
 }
 
 function applyFaceCount(value, { persist = true } = {}) {
   const count = clampFaces(value);
+  lifecycle.update({ faceCount: count });
   faceCountInput.value = String(count);
   updateFaceCountValue(count);
   if (persist) rememberFaceCount(count);

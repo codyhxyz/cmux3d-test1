@@ -3,7 +3,29 @@
 // alike on the wire, so the difference is confined here rather than smeared
 // through terminals.js.
 
+import {
+  CubeControlFrame,
+  decodeFrame,
+  DEFAULT_FRAME_RATE,
+  encodeFrame,
+  encodeHeartbeat,
+  encodeResize as shellResizeFrame,
+  MAX_PAYLOAD_SIZE,
+  parseStatusFrame,
+  SHELL_CHANNEL,
+  validateSessionId,
+  validateShellId,
+} from './agentcore-protocol.js';
 import { activeHost, hostHttp, hostWebSocket } from './connection.js';
+import {
+  clampFaceCount,
+  DEFAULT_FACE_COUNT,
+  MAX_FACE_COUNT,
+  MIN_FACE_COUNT,
+} from './face-count.js';
+
+export { CubeControlFrame } from './agentcore-protocol.js';
+export { clampFaceCount, DEFAULT_FACE_COUNT, MAX_FACE_COUNT, MIN_FACE_COUNT } from './face-count.js';
 
 /**
  * @typedef {Object} CubeSocket  Structural subset of WebSocket that AttachAddon and TerminalFleet require.
@@ -24,14 +46,6 @@ import { activeHost, hostHttp, hostWebSocket } from './connection.js';
  * @property {() => Promise<{ok: boolean, reason?: string}>} probe
  */
 
-const STDIN = 0x00;
-const STDOUT = 0x01;
-const STDERR = 0x02;
-const STATUS = 0x03;
-const RESIZE = 0x04;
-const HEARTBEAT = 0x05;
-const SHUTDOWN = 0xff;
-
 // AgentCore's 256 KB replay buffer carries output missed *while disconnected*, not the
 // screen, so a fresh tab attaching to a live workspace gets nothing (measured: a marker
 // echoed before a drop was absent after reconnect). These bound a browser-local copy of
@@ -46,57 +60,21 @@ const SCROLLBACK_MAX_RECORDS = 16;
 const SCROLLBACK_TTL_MS = 24 * 60 * 60 * 1000;
 const SCROLLBACK_FLUSH_MS = 1500;
 
-const SHELL_FRAME_MAX = 65_536;
-const SHELL_PAYLOAD_MAX = SHELL_FRAME_MAX - 1;
 const PASSTHROUGH_FRAME_MAX = 32_768;
 // 250 frames/sec is the documented ceiling and the penalty is close 1008, so frames
 // leave on a token clock one at a time. A wider coalescing window makes each frame
 // fuller; it does not bound the burst, so it cannot be the rate limit.
-const FRAME_RATE = 200;
-const FRAME_INTERVAL_MS = 1000 / FRAME_RATE;
+const FRAME_INTERVAL_MS = 1000 / DEFAULT_FRAME_RATE;
 const COALESCE_MS = 4;
 const CONFIRM_MS = 20_000;
 const AWS_LOGIN_REQUIRED = 'AWS_LOGIN_REQUIRED';
-const SESSION_ID_MIN = 33;
-const SESSION_ID_MAX = 256;
-const SHELL_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
-
-// The cube is a prism: N-2 side panels plus two caps. Six is the square prism the
-// product shipped with and the count nobody who ignores the setting will ever leave.
-export const DEFAULT_FACE_COUNT = 6;
-export const MIN_FACE_COUNT = 6;
-// Measured, not assumed. AgentCore allows ten concurrent interactive shells per runtime
-// SESSION (spike/RESULTS.md T-10 — twelve shells across two sessions on one runtime is
-// what disproved the docs' "per runtime" reading). One workspace is one session, so an
-// eleventh face has nowhere to open. This mirrors MAX_FACE_COUNT in herdr-state.js; the
-// browser cannot import server code, so the two declare the same measured fact twice.
-export const MAX_FACE_COUNT = 10;
-
-/** Clamp rather than reject: a stale setting must cost a face, never the whole cube. */
-export function clampFaceCount(value, fallback = DEFAULT_FACE_COUNT) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return { faces: fallback, requested: null, clamped: false };
-  const requested = Math.trunc(number);
-  const faces = Math.min(MAX_FACE_COUNT, Math.max(MIN_FACE_COUNT, requested));
-  return { faces, requested, clamped: faces !== requested };
-}
 
 const { CONNECTING = 0, OPEN = 1, CLOSED = 3 } = globalThis.WebSocket || {};
 const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-const EMPTY = new Uint8Array(0);
-
-// A resize frame and a Ctrl-D keystroke both start with 0x04, so the frame type
-// has to be carried by the object. `instanceof` is unambiguous; a byte is not.
-export class CubeControlFrame extends Uint8Array {}
 
 // runtimeSessionId has a 33-character minimum, so a bare UUID is not enough.
 export function createSessionId(prefix = 'cube-spike-') {
-  const id = `${prefix}${crypto.randomUUID()}`;
-  if (id.length < SESSION_ID_MIN || id.length > SESSION_ID_MAX) {
-    throw new RangeError(`runtimeSessionId must be ${SESSION_ID_MIN}-${SESSION_ID_MAX} characters; got ${id.length}`);
-  }
-  return id;
+  return validateSessionId(`${prefix}${crypto.randomUUID()}`, RangeError);
 }
 
 /** Today's path, unchanged: a real WebSocket and the 8-byte big-endian CUBE frame. */
@@ -148,9 +126,7 @@ export function createShellTransport({
         + '/invocations call, so a shell opened before it has no persistent storage and loses all work at idle timeout',
     );
   }
-  if (sessionId.length < SESSION_ID_MIN || sessionId.length > SESSION_ID_MAX) {
-    throw new RangeError(`runtimeSessionId must be ${SESSION_ID_MIN}-${SESSION_ID_MAX} characters; got ${sessionId.length}`);
-  }
+  validateSessionId(sessionId, RangeError);
 
   const workspace = createWorkspaceGate(ensureWorkspace);
   const faceCount = clampFaceCount(faces).faces;
@@ -385,53 +361,45 @@ class ShellSocket {
 
   #receive(data) {
     if (!data || typeof data === 'string') return;
-    const frame = new Uint8Array(data);
-    if (!frame.length) return;
-    const payload = frame.subarray(1);
-    if (frame[0] === STDOUT || frame[0] === STDERR) {
+    let frame;
+    try {
+      frame = decodeFrame(data);
+    } catch {
+      return;
+    }
+    if (frame.channel === SHELL_CHANNEL.STDOUT || frame.channel === SHELL_CHANNEL.STDERR) {
       // Streaming decode: a frame boundary can fall inside a multi-byte sequence, and
       // a per-frame decoder would persist a U+FFFD where an emoji was.
-      this.#scrollback?.push(this.#key, this.#decoder.decode(payload, { stream: true }));
-      this.#events.emit({ type: 'message', data: payload.slice().buffer });
+      this.#scrollback?.push(this.#key, this.#decoder.decode(frame.payload, { stream: true }));
+      this.#events.emit({ type: 'message', data: frame.payload.buffer });
     }
-    else if (frame[0] === STATUS) this.#status(payload);
+    else if (frame.channel === SHELL_CHANNEL.STATUS) this.#status(parseStatusFrame(frame.payload));
     // A server-sent CLOSE is the platform evicting the microVM. That is the sleep
     // signal, not a fault, and it must reach the interface.
-    else if (frame[0] === SHUTDOWN) this.#end(1001, 'vm-evicted');
+    else if (frame.channel === SHELL_CHANNEL.CLOSE) this.#end(1001, 'vm-evicted');
   }
 
-  // Mirrors parseStatusFrame() in spike/harness/shell-client.mjs: the same bytes must
-  // classify the same way in both implementations.
-  #status(payload) {
-    let status = null;
-    try {
-      status = JSON.parse(decoder.decode(payload));
-    } catch {
-      // Diagnostics only; a malformed status must not take the face down.
-    }
-    if (!status) return;
-    const metadata = status.metadata;
-    if (typeof metadata?.shellId === 'string') {
+  #status(parsed) {
+    if (parsed.type === 'unparsed') return;
+    if (parsed.type === 'confirmation') {
       // A second confirmation arrives once the 256 KB replay buffer has drained. It
       // carries bytesDropped and no `reconnected`, so it is neither a termination nor
       // permission to forget what the first frame said.
-      if (this.#confirmed) this.#observe(metadata);
-      else this.#confirm(metadata);
+      if (this.#confirmed) this.#observe(parsed);
+      else this.#confirm(parsed);
       return;
     }
-    const cause = status.details?.causes?.find(({ reason }) => reason === 'ExitCode' || reason === 'Signal');
-    if (cause) {
-      this.#end(1000, `${cause.reason} ${cause.message}`);
-      return;
-    }
-    if (status.status === 'Success') {
-      this.#end(1000, status.reason || 'shell ended');
+    if (parsed.type === 'exit') {
+      const cause = parsed.status?.details?.causes?.find(
+        ({ reason }) => reason === 'ExitCode' || reason === 'Signal',
+      );
+      this.#end(1000, cause ? `${cause.reason} ${cause.message}` : parsed.status?.reason || 'shell ended');
       return;
     }
     // Everything else is informational — a Failure report, or a status this client does
     // not know yet. Only a positively-identified termination may end the face; the
     // service closes the socket itself when the shell is actually gone.
-    this.statusError = status.reason || status.message || null;
+    this.statusError = parsed.reason || parsed.message || null;
   }
 
   // Latching, not assignment: the first confirmation carries `reconnected` and no
@@ -459,7 +427,7 @@ class ShellSocket {
     if (this.#heartbeatMs) {
       // Browsers cannot send RFC 6455 pings, and a quiet face is dropped at the
       // proxy's ~15 minute idle timeout.
-      this.#heartbeatTimer = setInterval(() => this.send(controlFrame(HEARTBEAT, EMPTY)), this.#heartbeatMs);
+      this.#heartbeatTimer = setInterval(() => this.send(encodeHeartbeat()), this.#heartbeatMs);
     }
     // AttachAddon throws — not warns — when readyState is not OPEN, and it reads
     // it from a term.onData handler, so this must be true before any listener can
@@ -473,7 +441,7 @@ class ShellSocket {
     this.#stdin.push(bytes);
     this.#stdinBytes += bytes.length;
     // A full frame is already decided; waiting out the window only delays a paste.
-    if (this.#stdinBytes >= SHELL_PAYLOAD_MAX) this.#flush();
+    if (this.#stdinBytes >= MAX_PAYLOAD_SIZE) this.#flush();
     else this.#schedule();
   }
 
@@ -488,7 +456,9 @@ class ShellSocket {
     const bytes = concat(this.#stdin);
     this.#stdin = [];
     this.#stdinBytes = 0;
-    for (const chunk of chunks(bytes, SHELL_PAYLOAD_MAX)) this.#frames.push(controlFrame(STDIN, chunk));
+    for (const chunk of chunks(bytes, MAX_PAYLOAD_SIZE)) {
+      this.#frames.push(encodeFrame(SHELL_CHANNEL.STDIN, chunk));
+    }
   }
 
   #schedule() {
@@ -948,15 +918,7 @@ function shellIdFor(face, slot, faceOffset) {
   // deterministic either way so a reload reclaims its shells instead of doubling
   // them and fighting itself with close 4000.
   const id = slot ? `face-${face + faceOffset}-slot-${slot}` : `face-${face + faceOffset}`;
-  if (!SHELL_ID.test(id)) throw new RangeError(`invalid shellId: ${id}`);
-  return id;
-}
-
-function shellResizeFrame(cols, rows) {
-  // A fit addon can hand back a fraction, and {"width":79.5} is not a geometry.
-  const width = Math.max(1, Math.floor(cols));
-  const height = Math.max(1, Math.floor(rows));
-  return controlFrame(RESIZE, encoder.encode(JSON.stringify({ width, height })));
+  return validateShellId(id, RangeError);
 }
 
 function cubeResizeFrame(cols, rows) {
@@ -965,13 +927,6 @@ function cubeResizeFrame(cols, rows) {
   view.setUint32(0, 0x43554245); // CUBE
   view.setUint16(4, cols);
   view.setUint16(6, rows);
-  return frame;
-}
-
-function controlFrame(channel, payload) {
-  const frame = new CubeControlFrame(payload.length + 1);
-  frame[0] = channel;
-  frame.set(payload, 1);
   return frame;
 }
 

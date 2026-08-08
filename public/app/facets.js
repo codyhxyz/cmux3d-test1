@@ -2,20 +2,24 @@
 // Crown and a Keel cap. At six faces that is a square prism, which is the cube the
 // product shipped with, down to the names, codes and orbit angles below.
 
+import {
+  clampFaceCount,
+  DEFAULT_FACE_COUNT,
+  MAX_FACE_COUNT,
+  MIN_FACE_COUNT,
+} from './face-count.js';
+
+export {
+  DEFAULT_FACE_COUNT as DEFAULT_FACES,
+  MAX_FACE_COUNT as MAX_FACES,
+  MIN_FACE_COUNT as MIN_FACES,
+} from './face-count.js';
+
 const terminalTheme = {
   background: 'transparent',
   foreground: '#e7edf5',
   cursor: '#64c7e8',
 };
-
-export const MIN_FACES = 6;
-// Measured, not assumed. AgentCore serves ten concurrent interactive shells per runtime
-// SESSION — spike/RESULTS.md T-10, where twelve shells across two sessions on one
-// runtime is what disproved the docs' "per runtime" reading. One workspace is one
-// session, so one workspace can never render more than ten faces. This constant is that
-// limit and nothing else; do not raise it without re-measuring.
-export const MAX_FACES = 10;
-export const DEFAULT_FACES = 6;
 
 // Crown and Keel hold face indices 4 and 5 at every count, so widening the prism never
 // renames a face or moves an agent onto a different panel — the sides that appear take
@@ -42,13 +46,11 @@ const SIDES = [
 
 // Out of range is clamped, never fatal: this value reaches us from a slider, from
 // localStorage and from the gateway, and any of them can be stale or hand-edited.
-export function clampFaces(value, fallback = DEFAULT_FACES) {
-  const number = Math.trunc(Number(value));
-  if (!Number.isFinite(number)) return fallback;
-  return Math.min(MAX_FACES, Math.max(MIN_FACES, number));
+export function clampFaces(value, fallback = DEFAULT_FACE_COUNT) {
+  return clampFaceCount(value, fallback).faces;
 }
 
-export function buildFacets(count = DEFAULT_FACES) {
+export function buildFacets(count = DEFAULT_FACE_COUNT) {
   const faces = clampFaces(count);
   const sides = faces - CAPS.length;
   const step = 360 / sides;
@@ -67,7 +69,7 @@ export function buildFacets(count = DEFAULT_FACES) {
 // at ten faces, which would leave the frame on a phone. This scales the whole prism
 // back to the square prism's circumradius. It is exactly 1 at four sides, so six faces
 // are scaled by an identity matrix and nothing moves.
-export function drumScale(count = DEFAULT_FACES) {
+export function drumScale(count = DEFAULT_FACE_COUNT) {
   const sides = clampFaces(count) - CAPS.length;
   return Math.sin(Math.PI / sides) / Math.sin(Math.PI / 4);
 }
@@ -142,7 +144,7 @@ function normalizeAngle(degrees) {
 // terminals.js and space.js import this binding directly. It is reassigned rather than
 // mutated in place so every importer moves to the new list at the same instant through
 // the ES module live binding.
-export let FACETS = buildFacets(DEFAULT_FACES);
+export let FACETS = buildFacets(DEFAULT_FACE_COUNT);
 
 export function setFaceCount(count) {
   FACETS = buildFacets(count);

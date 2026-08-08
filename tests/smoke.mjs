@@ -11,6 +11,19 @@ import { herdrMetadata } from '../public/app/herdr.js';
 import { accessoryKeyInput, commandKeyInput, commandPromptDirection, ctrlCode, promptLine } from '../public/app/terminal-keys.js';
 import { DEFAULT_AGENTCORE_ORIGIN, mixedContentBlocked, normalizeHostOrigin, pairingUrl, parseFragment } from '../public/app/connection-config.js';
 import {
+  encodeResize as encodeProtocolResize,
+  encodeStdin as encodeProtocolStdin,
+  parseStatusFrame as parseProtocolStatus,
+  SHELL_CHANNEL,
+} from '../public/app/agentcore-protocol.js';
+import {
+  clampFaceCount as canonicalClampFaceCount,
+  DEFAULT_FACE_COUNT as CANONICAL_DEFAULT_FACE_COUNT,
+  MAX_FACE_COUNT as CANONICAL_MAX_FACE_COUNT,
+  MIN_FACE_COUNT as CANONICAL_MIN_FACE_COUNT,
+} from '../public/app/face-count.js';
+import { MAX_FACES } from '../public/app/facets.js';
+import {
   createWorkspaceLifecycle,
   deriveWorkspaceState,
   describeActivity,
@@ -36,8 +49,9 @@ import {
   STOP_SPEED,
 } from '../public/app/space.js';
 import { VENDOR_ASSETS } from '../src/vendor-assets.js';
-import { readServerOptions } from '../src/server/config.js';
+import { readCloudOptions, readServerOptions } from '../src/server/config.js';
 import { createCloudRoutes } from '../src/server/cloud/routes.js';
+import { parseArgs as parseStandaloneArgs } from '../src/server/cloud/standalone.js';
 import {
   clampFaceCount,
   countCubeFaces,
@@ -51,13 +65,19 @@ import {
 } from '../src/server/herdr-state.js';
 import { browserOriginAllowed } from '../src/server/origin.js';
 import { createRuntime } from '../src/server/runtime.js';
-import { createTailnetIdentity, parseServeIdentity, parseServeStatus, parseStatus, parseWhois, supportsServeBackground } from '../src/server/tailscale.js';
+import { createTailnetIdentity, parseServeIdentity, parseServeStatus, parseStatus, parseWhois } from '../src/server/tailscale.js';
 import { loadOrCreateToken, rotateToken } from '../src/server/token-store.js';
+import {
+  encodeResize as encodeHarnessResize,
+  encodeStdin as encodeHarnessStdin,
+  parseStatusFrame as parseHarnessStatus,
+} from '../spike/harness/shell-client.mjs';
 
 await checkHerdrStateEndpoint();
 await checkGatewayOnly();
 await checkRenamedBrowserStore();
 await checkAwsLoginFailStop();
+await checkRuntimeProvisioningHelper();
 await checkFaceCount();
 
 assert.equal(commandKeyInput({ key: 'ArrowLeft', metaKey: true }), '\x01', 'command-left should move to the start of the shell input');
@@ -109,6 +129,20 @@ assert.equal(readServerOptions(tokenEnv, []).expose, false, 'exposing the cube t
 assert.equal(readServerOptions({ ...tokenEnv, CODING_CUBE_GATEWAY_ONLY: '1' }, []).gatewayOnly, true, 'the cloud host should expose terminals without serving a second cube');
 assert.equal(readServerOptions(tokenEnv, ['--expose']).expose, true, '--expose should opt in to tailnet exposure');
 assert.equal(readServerOptions({ ...tokenEnv, CODING_CUBE_TAILSCALE: 'serve' }, []).serveOnly, true, 'a cloud gateway should use Tailscale Serve without binding to the tailnet IP');
+const parsedCloud = readCloudOptions({}, [
+  '--runtime-arn=arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test',
+  '--region', 'us-west-2', '--origin=https://first.example', '--origin', 'https://second.example', '--pin-session',
+]);
+assert.equal(parsedCloud.region, 'us-west-2', 'cloud options should accept both inline and spaced values');
+assert.deepEqual(parsedCloud.origins, ['https://first.example'], 'repeated --origin remains first-value-wins');
+assert.equal(parsedCloud.pinSession, true, 'a bare boolean flag should remain accepted');
+assert.equal(readCloudOptions({}, ['--runtime-arn']), null, 'a bare value option must not become a truthy runtime ARN');
+assert.doesNotThrow(() => readServerOptions(tokenEnv, ['--unknown-option']), 'unknown server options were historically ignored');
+assert.deepEqual(
+  parseStandaloneArgs(['--port=9000', '--allow-file-origin', '--origin', 'https://one.example', '--origin=https://two.example']),
+  { port: '9000', allowFileOrigin: true, origin: 'https://two.example' },
+  'the standalone minter keeps inline/spaced values, bare flags and last-value-wins repeats',
+);
 assert.deepEqual(
   readServerOptions({ ...tokenEnv, CODING_CUBE_TAILSCALE_USERS: 'me@example.com, other@example.com ' }, []).tailscaleUsers,
   ['me@example.com', 'other@example.com'],
@@ -170,6 +204,14 @@ assert.equal(
   'four of six faces attached is still waking, and saying Ready then would be a lie',
 );
 assert.equal(
+  deriveWorkspaceState({ cloud: true, connection: 'connected', faces: 6, faceCount: 10, workspace: { state: 'ready' } }).state,
+  'waking',
+  'six open sockets must not make a configured ten-face workspace Ready',
+);
+const tenAttached = deriveWorkspaceState({ cloud: true, connection: 'connected', faces: 10, faceCount: 10, workspace: { state: 'ready' } });
+assert.equal(tenAttached.state, 'ready', 'a ten-face workspace becomes Ready only at 10/10');
+assert.equal(tenAttached.detail, 'All 10 terminals are attached.', 'Ready copy must follow the served count rather than hard-code six');
+assert.equal(
   deriveWorkspaceState({ cloud: true, preparing: true, elapsedMs: STUCK_AFTER_MS }).state,
   'attention',
   'a wake that never lands must stop calling itself Waking; cold start was measured at 1.3s',
@@ -209,6 +251,8 @@ assert.equal(formatElapsed(4999), '0:04');
 assert.equal(formatElapsed(65_000), '1:05', 'elapsed time should read as a clock, not milliseconds');
 const activityNow = Date.parse('2026-08-04T12:00:00Z');
 assert.equal(describeActivity({ cloud: true, connection: 'connected' }), 'active now');
+assert.equal(describeActivity({ cloud: false, connection: 'idle', lastConnected: activityNow - 5_000, now: activityNow }), 'just now');
+assert.equal(describeActivity({ cloud: false, connection: 'idle', lastConnected: activityNow - 120_000, now: activityNow }), '2m ago');
 assert.equal(describeActivity({ cloud: true, connection: 'unpaired' }), 'never started');
 assert.equal(describeActivity({ cloud: true, connection: 'unpaired', lastConnected: activityNow - 7_200_000, now: activityNow }), 'slept 2h ago');
 assert.equal(
@@ -295,9 +339,6 @@ assert.deepEqual(
   'an active serve rule should be recognised, funnel included',
 );
 assert.deepEqual(parseServeStatus({ Web: { 'mymac.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:9999' } } } } }, 8064).tsOrigin, null, 'a serve rule for another port is not our exposure');
-assert.equal(supportsServeBackground([1, 56]), true, 'tailscale 1.56 introduced the background serve flag');
-assert.equal(supportsServeBackground([1, 40]), false, 'older tailscale needs the manual serve command');
-
 // Identity comes from `tailscale whois`, so a device Tailscale vouches for needs
 // no second pairing code and an unknown address gets nothing.
 assert.deepEqual(
@@ -556,7 +597,9 @@ try {
   assert.match(mainSource, /new EventSource\(hostHttp\('\/api\/herdr\/events'\)\)/, 'the UI should subscribe to HerdR events');
   assert.match(mainSource, /space\.bind\(\);\s*connectHost\(\);/, 'every device should try to reach a host');
   assert.doesNotMatch(mainSource, /pointer: fine/, 'phones must not be excluded from pairing');
-  assert.match(mainSource, /AbortSignal\.timeout\(3000\)/, 'an unreachable host should stop background pairing quickly');
+  assert.match(mainSource, /await fleet\.transport\.probe\(\)/, 'main should delegate reachability to the selected transport');
+  const transportSource = await (await fetch(`${httpBase}/app/transport.js`)).text();
+  assert.match(transportSource, /AbortSignal\.timeout\(3000\)/, 'an unreachable origin should stop background pairing quickly');
   assert.match(mainSource, /function setConnectionState\(/, 'the UI should track one connection state rather than a preview flag');
   assert.match(mainSource, /desktopShells\.href = hostHttp\('\/'\)/, 'desktop shells should use the shared host URL');
   assert.match(mainSource, /if \(active\) connectHost\(\)/, 'returning to the tab should re-check the host');
@@ -671,25 +714,39 @@ async function importTransport() {
 async function checkFaceCount() {
   assert.equal(DEFAULT_FACE_COUNT, 6, 'the shipped cube is six faces and stays six for anyone who never asks');
   assert.equal(MIN_FACE_COUNT, 6, 'below six the shape stops being a cube at all');
+  assert.equal(DEFAULT_FACE_COUNT, CANONICAL_DEFAULT_FACE_COUNT);
+  assert.equal(MIN_FACE_COUNT, CANONICAL_MIN_FACE_COUNT);
   // Measured, not read off a docs page: spike/RESULTS.md T-10 opened twelve shells
   // across two sessions on one runtime, which is what proved the cap is per SESSION.
   // One workspace is one session, so ten is the hard ceiling on faces.
   assert.equal(MAX_FACE_COUNT, 10, 'AgentCore allows ten concurrent shells per runtime session (spike/RESULTS.md T-10)');
+  assert.equal(MAX_FACE_COUNT, CANONICAL_MAX_FACE_COUNT);
+  assert.equal(MAX_FACES, MAX_FACE_COUNT, 'geometry imports the canonical measured ceiling');
+  assert.equal(clampFaceCount, canonicalClampFaceCount, 'the server re-exports the canonical clamp instead of implementing another one');
   assert.deepEqual(clampFaceCount(undefined), { faces: 6, requested: null, clamped: false }, 'a client that never mentions faces must get exactly today\'s cube');
   assert.deepEqual(clampFaceCount('8'), { faces: 8, requested: 8, clamped: false }, 'the count arrives as a query string and must survive the trip');
   assert.deepEqual(clampFaceCount(11), { faces: 10, requested: 11, clamped: true }, 'past the ceiling the gateway clamps and says so rather than failing');
   assert.deepEqual(clampFaceCount(2), { faces: 6, requested: 2, clamped: true }, 'under the floor clamps the same way');
 
+  assert.equal(parseHarnessStatus, parseProtocolStatus, 'the harness consumes the production status parser without duplicating it');
+  assert.equal(encodeHarnessResize, encodeProtocolResize, 'the harness consumes the production resize codec without duplicating it');
+  assert.equal(encodeHarnessStdin, encodeProtocolStdin, 'the harness consumes the production stdin codec without duplicating it');
+  const statusCases = [
+    { payload: '{not-json', type: 'unparsed' },
+    { payload: JSON.stringify({ metadata: { shellId: 'face-1', reconnected: true, bytesDropped: 4 } }), type: 'confirmation' },
+    { payload: JSON.stringify({ details: { causes: [{ reason: 'ExitCode', message: '7' }] } }), type: 'exit' },
+    { payload: JSON.stringify({ status: 'Failure', reason: 'Nope', code: 'Bad' }), type: 'error' },
+  ];
+  for (const { payload, type } of statusCases) {
+    assert.equal(parseProtocolStatus(new TextEncoder().encode(payload)).type, type, `${type} status frames must classify consistently`);
+  }
+  const stdin = encodeProtocolStdin(new Uint8Array(65_536));
+  assert.equal(stdin.length, 2, 'stdin beyond one payload is split before it reaches the service');
+  assert.ok(stdin.every((frame) => frame[0] === SHELL_CHANNEL.STDIN && frame.length <= 65_536));
+
   const { clampFaceCount: clampInBrowser, createShellTransport, MAX_FACE_COUNT: BROWSER_MAX } = await importTransport();
-  assert.equal(BROWSER_MAX, MAX_FACE_COUNT, 'the browser cannot import server code, so both copies of the measured ceiling must agree');
-  // The geometry owns a third copy for the same reason. Three declarations of one
-  // measured fact are three chances to drift; this is the thing that notices.
-  assert.match(
-    await readFile('public/app/facets.js', 'utf8'),
-    new RegExp(`MAX_FACES = ${MAX_FACE_COUNT}\\b`),
-    'the prism geometry, the transport and the gateway must agree on the ten-shell ceiling',
-  );
-  assert.deepEqual(clampInBrowser(11), clampFaceCount(11), 'both sides must clamp identically or the UI and the gateway disagree about what is showing');
+  assert.equal(BROWSER_MAX, MAX_FACE_COUNT, 'the browser imports the canonical measured ceiling');
+  assert.equal(clampInBrowser, canonicalClampFaceCount, 'the browser transport re-exports the canonical clamp');
   const transport = createShellTransport({
     sessionId: 'cube-test-12345678-1234-1234-1234-123456789012',
     scrollback: null,
@@ -697,6 +754,11 @@ async function checkFaceCount() {
     ensureWorkspace: async () => ({ state: 'ready', faces: [] }),
   });
   assert.equal(transport.faces, 6, 'a transport nobody configured is a six-face cube');
+  assert.deepEqual(
+    [...transport.encodeResize(79.9, 24.8)],
+    [...encodeProtocolResize(79.9, 24.8)],
+    'the production transport uses the shared resize codec',
+  );
   assert.equal(transport.shellIdFor(0), 'face-1', 'the faceOffset 1 rule is unchanged');
   assert.equal(transport.shellIdFor(9), 'face-10', 'the tenth face is face-10, not a new id scheme');
   assert.throws(
@@ -854,6 +916,78 @@ function collectResponse() {
   return { writeHead() {}, end() {}, setHeader() {} };
 }
 
+async function checkRuntimeProvisioningHelper() {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'coding-cube-runtime-lib-'));
+  const attempts = path.join(directory, 'attempts');
+  const calls = path.join(directory, 'calls');
+  await writeFile(attempts, '0');
+  const helper = fileURLToPath(new URL('../spike/aws/runtime-lib.sh', import.meta.url));
+
+  const runHelper = (body) => new Promise((resolve) => {
+    const child = spawn('sh', ['-c', body], {
+      env: { ...process.env, RUNTIME_LIB: helper, ATTEMPTS: attempts, CALLS: calls },
+    });
+    let output = '';
+    child.stdout.setEncoding('utf8').on('data', (chunk) => { output += chunk; });
+    child.stderr.setEncoding('utf8').on('data', (chunk) => { output += chunk; });
+    child.once('close', (code) => resolve({ code, output }));
+  });
+
+  try {
+    const ready = await runHelper(`
+      set -eu
+      . "$RUNTIME_LIB"
+      die() { printf '%s\\n' "$1" >&2; exit 7; }
+      aws_() { printf 'READY\\n'; }
+      sleep() { :; }
+      runtime_wait_ready runtime-ready
+    `);
+    assert.equal(ready.code, 0, `READY should settle provisioning: ${ready.output}`);
+
+    const failed = await runHelper(`
+      set -eu
+      . "$RUNTIME_LIB"
+      die() { printf '%s\\n' "$1" >&2; exit 7; }
+      aws_() { case "$*" in *failureReason*) printf 'bad image\\n' ;; *) printf 'CREATE_FAILED\\n' ;; esac; }
+      sleep() { :; }
+      runtime_wait_ready runtime-failed
+    `);
+    assert.equal(failed.code, 7, 'a terminal AgentCore status must use the caller\'s failure path');
+    assert.match(failed.output, /CREATE_FAILED \(bad image\)/);
+
+    const retried = await runHelper(`
+      set -eu
+      . "$RUNTIME_LIB"
+      die() { printf '%s\\n' "$1" >&2; exit 7; }
+      say() { :; }
+      warn() { printf '%s\\n' "$1" >&2; }
+      run() { "$@"; }
+      sleep() { :; }
+      METADATA='{"requireMMDSV2":true}'
+      aws_() {
+        case "$*" in
+          *create-agent-runtime*)
+            count=$(cat "$ATTEMPTS"); count=$((count + 1)); printf '%s' "$count" > "$ATTEMPTS"
+            [ "$count" -gt 1 ] || return 1
+            printf 'runtime-retried\\n'
+            ;;
+          *update-agent-runtime*) printf '%s\\n' "$*" >> "$CALLS" ;;
+          *get-agent-runtime*) printf 'READY\\n' ;;
+        esac
+      }
+      runtime_create_with_retry cube_test --agent-runtime-artifact artifact --role-arn role
+      runtime_enable_mmdsv2 "$RUNTIME_ID" --agent-runtime-artifact artifact --role-arn role
+    `);
+    assert.equal(retried.code, 0, `an IAM propagation retry should recover: ${retried.output}`);
+    assert.equal(await readFile(attempts, 'utf8'), '2', 'runtime creation should retry once after a propagation failure');
+    const update = await readFile(calls, 'utf8');
+    assert.match(update, /--agent-runtime-artifact artifact/);
+    assert.match(update, /--metadata-configuration \{"requireMMDSV2":true\}/, 'the shared update remains a full replacement with MMDSv2');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 async function checkAwsLoginFailStop() {
   const { createShellTransport } = await importTransport();
   const authError = Object.assign(new Error('AWS login required'), { code: 'AWS_LOGIN_REQUIRED' });
@@ -950,9 +1084,13 @@ async function unusedPort() {
 
 async function checkRenamedBrowserStore() {
   const data = new Map();
+  let writes = 0;
   const storage = {
     getItem: (key) => data.get(key) ?? null,
-    setItem: (key, value) => data.set(key, value),
+    setItem: (key, value) => {
+      writes += 1;
+      data.set(key, value);
+    },
     removeItem: (key) => data.delete(key),
   };
   const legacyKey = `${['cmux', '3d'].join('')}.hosts.v1`;
@@ -972,6 +1110,9 @@ async function checkRenamedBrowserStore() {
     const connection = await import(`../public/app/connection.js?rename-test=${Date.now()}`);
     assert.equal(connection.activeHost().token, 'secret', 'the product rename must preserve paired computers');
     assert.equal(data.has(legacyKey), false, 'the old browser key should be removed after migration');
+    const beforeConnected = writes;
+    connection.markConnected();
+    assert.equal(writes, beforeConnected + 1, 'markConnected should persist the active host and timestamp in one write');
     assert.ok(data.has('coding-cube.hosts.v1'), 'the renamed browser key should be written');
 
     // A browser that used the Tailscale box, then the cloud back when it was called

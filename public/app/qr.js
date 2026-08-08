@@ -20,14 +20,3 @@ export function qrSvg(text, { quiet = 4, level = 'M' } = {}) {
     + `<rect width="${span}" height="${span}" fill="#ffffff"/>`
     + `<path d="${path}" fill="#000000"/></svg>`;
 }
-
-export function qrModules(text, { level = 'M' } = {}) {
-  const code = qrcode(0, level);
-  code.addData(text);
-  code.make();
-  const size = code.getModuleCount();
-  return {
-    size,
-    modules: Array.from({ length: size }, (_, row) => Array.from({ length: size }, (_, column) => (code.isDark(row, column) ? 1 : 0))),
-  };
-}

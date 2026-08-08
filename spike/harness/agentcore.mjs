@@ -10,6 +10,7 @@
 import https from 'node:https';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseArgs as parseNodeArgs } from 'node:util';
 import { mkdir, writeFile } from 'node:fs/promises';
 import {
   buildInvocationsUrl,
@@ -955,23 +956,30 @@ async function attach(ctx) {
 }
 
 function parseArgs(argv) {
-  const options = { _: [] };
-  for (let index = 0; index < argv.length; index += 1) {
-    const token = argv[index];
-    if (!token.startsWith('--')) {
-      options._.push(token);
-      continue;
-    }
-    const [name, inline] = token.slice(2).split('=');
-    const key = name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
-    const next = argv[index + 1];
-    if (inline !== undefined) options[key] = inline;
-    else if (next && !next.startsWith('--')) {
-      options[key] = next;
-      index += 1;
-    } else options[key] = true;
-  }
-  return options;
+  const stringOptions = [
+    'runtime-arn', 'region', 'qualifier', 'session', 'face', 'auth', 'signer',
+    'idle-wait', 'eviction-ladder', 'hold-wait', 'connect-timeout', 'out',
+    'bootstrap', 'payload', 'op', 'cmd', 'seconds',
+  ];
+  const booleanOptions = ['slow', 'passthrough', 'dry-run', 'confirm', 'help'];
+  const { values, positionals } = parseNodeArgs({
+    args: argv,
+    allowPositionals: true,
+    strict: false,
+    options: {
+      ...Object.fromEntries(stringOptions.map((name) => [name, { type: 'string' }])),
+      ...Object.fromEntries(booleanOptions.map((name) => [name, { type: 'boolean' }])),
+    },
+  });
+  return {
+    _: positionals,
+    ...Object.fromEntries(
+      Object.entries(values).map(([name, value]) => [
+        name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()),
+        value,
+      ]),
+    ),
+  };
 }
 
 function usage() {

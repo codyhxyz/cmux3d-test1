@@ -60,9 +60,14 @@ export function removeHost(origin) {
 }
 
 export function markConnected() {
-  const host = setActiveHost(activeHost().origin);
-  if (!host) return;
-  host.lastConnected = Date.now();
+  const host = activeHost();
+  if (!host.origin) return;
+  store.hosts[host.origin] = {
+    ...host,
+    addedAt: host.addedAt || Date.now(),
+    lastConnected: Date.now(),
+  };
+  store.activeOrigin = host.origin;
   writeStore();
 }
 

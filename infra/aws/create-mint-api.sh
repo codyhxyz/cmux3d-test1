@@ -48,25 +48,10 @@ ROLE_ARN="arn:aws:iam::$ACCOUNT:role/$ROLE_NAME"
 LOG_GROUP="/aws/lambda/$FUNCTION"
 API_LOG_GROUP="/aws/apigateway/$API_NAME"
 
-DRY_RUN=0
-case "${1:-}" in
-  --dry-run|--plan) DRY_RUN=1 ;;
-  '') ;;
-  *) printf 'usage: %s [--dry-run]\n' "$0" >&2; exit 2 ;;
-esac
-
-say() { printf '\033[36m>\033[0m %s\n' "$1"; }
-warn() { printf '\033[33m!\033[0m %s\n' "$1" >&2; }
-die() { printf '\033[31mx\033[0m %s\n' "$1" >&2; exit 1; }
-run() { printf '\033[35m$\033[0m %s\n' "$*" >&2; "$@"; }
-aws_() { aws --region "$REGION" "$@"; }
-
-command -v aws >/dev/null 2>&1 || die 'the aws cli is not installed'
+. "$HERE/aws-common.sh"
+aws_common_parse_dry_run "$@"
+aws_verify_account
 command -v zip >/dev/null 2>&1 || die 'zip is required to build the deployment package'
-CALLER=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) \
-  || die 'no usable AWS credentials'
-[ "$CALLER" = "$ACCOUNT" ] \
-  || die "credentials are for account $CALLER but this script targets $ACCOUNT"
 
 [ -n "$USER_POOL_ID" ] || die 'CUBE_USER_POOL_ID is required. Run infra/aws/create-identity.sh first.'
 [ -n "$APP_CLIENT_ID" ] || die 'CUBE_APP_CLIENT_ID is required. Run infra/aws/create-identity.sh first.'

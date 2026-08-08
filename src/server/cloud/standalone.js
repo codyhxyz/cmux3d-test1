@@ -15,6 +15,7 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseArgs as parseNodeArgs } from 'node:util';
 import { VENDOR_ASSETS } from '../../vendor-assets.js';
 import { readCloudOptions } from '../config.js';
 import { createMinter } from './mint.js';
@@ -50,20 +51,30 @@ const USAGE = 'Usage: node spike/mint-server.mjs --runtime-arn <arn> [--region u
   + '\nOr just run `npm start` with CUBE_RUNTIME_ARN set: one process, one origin, port 8064.\n';
 
 export function parseArgs(argv) {
-  const options = {};
-  for (let index = 0; index < argv.length; index += 1) {
-    const token = argv[index];
-    if (!token.startsWith('--')) continue;
-    const [name, inline] = token.slice(2).split('=');
-    const key = name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
-    const next = argv[index + 1];
-    if (inline !== undefined) options[key] = inline;
-    else if (next && !next.startsWith('--')) {
-      options[key] = next;
-      index += 1;
-    } else options[key] = true;
-  }
-  return options;
+  const { values } = parseNodeArgs({
+    args: argv,
+    allowPositionals: true,
+    strict: false,
+    options: {
+      'runtime-arn': { type: 'string' },
+      region: { type: 'string' },
+      session: { type: 'string' },
+      qualifier: { type: 'string' },
+      expires: { type: 'string' },
+      signer: { type: 'string' },
+      origin: { type: 'string' },
+      port: { type: 'string' },
+      'pin-session': { type: 'boolean' },
+      'allow-file-origin': { type: 'boolean' },
+      'no-cloud': { type: 'boolean' },
+    },
+  });
+  return Object.fromEntries(
+    Object.entries(values).map(([name, value]) => [
+      name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()),
+      value,
+    ]),
+  );
 }
 
 function flag(value) {

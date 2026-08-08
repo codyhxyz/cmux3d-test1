@@ -64,38 +64,18 @@ MIN_CLI="2.34.16"
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 IMAGE_URI="$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG"
 
-DRY_RUN=0
-case "${1:-}" in
-  --dry-run|--plan) DRY_RUN=1 ;;
-  '') ;;
-  *) printf 'usage: %s [--dry-run]\n' "$0" >&2; exit 2 ;;
-esac
-
-say() { printf '\033[36m>\033[0m %s\n' "$1"; }
-warn() { printf '\033[33m!\033[0m %s\n' "$1" >&2; }
-die() { printf '\033[31mx\033[0m %s\n' "$1" >&2; exit 1; }
-run() { printf '\033[35m$\033[0m %s\n' "$*" >&2; "$@"; }
-aws_() { aws --region "$REGION" "$@"; }
-
-version_ge() {
-  awk -v have="$1" -v want="$2" '
-    function num(v,  p) { split(v, p, "."); return p[1] * 1000000 + p[2] * 1000 + p[3] }
-    BEGIN { exit !(num(have) >= num(want)) }
-  '
-}
+. "$HERE/../../infra/aws/aws-common.sh"
+. "$HERE/runtime-lib.sh"
+RUNTIME_FAILURE_HINT=''
+aws_common_parse_dry_run "$@"
 
 # ------------------------------------------------------------------- preflight --
 
-command -v aws >/dev/null 2>&1 || die 'the aws cli is not installed'
+aws_verify_account
 CLI_VERSION=$(aws --version 2>&1 | sed -n 's|^aws-cli/\([0-9][0-9.]*\).*|\1|p')
 [ -n "$CLI_VERSION" ] || die 'could not read a version out of `aws --version`'
-version_ge "$CLI_VERSION" "$MIN_CLI" \
+runtime_version_ge "$CLI_VERSION" "$MIN_CLI" \
   || die "AWS CLI $CLI_VERSION cannot express --filesystem-configurations; $MIN_CLI or newer is required"
-
-CALLER=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) \
-  || die 'no usable AWS credentials'
-[ "$CALLER" = "$ACCOUNT" ] \
-  || die "credentials are for account $CALLER but this script targets $ACCOUNT"
 
 [ -f "$HERE/runtime-trust.json" ] || die "missing $HERE/runtime-trust.json"
 grep -qF "arn:aws:bedrock-agentcore:$REGION:$ACCOUNT:runtime/" "$HERE/runtime-trust.json" \
@@ -298,47 +278,17 @@ METADATA='{"requireMMDSV2":true}'
 # the image's. Without this pinning every face looks for a socket that is not there.
 ENVIRONMENT="{\"CODING_CUBE_SPIKE\":\"1\",\"CODING_CUBE_GATEWAY_ONLY\":\"1\",\"CODING_CUBE_MOUNT\":\"$MOUNT_PATH\",\"CODING_CUBE_WORKDIR\":\"$MOUNT_PATH/work\",\"CODING_CUBE_USER\":\"$USER_ID\",\"HOME\":\"/home/cube\",\"HERDR_SOCKET_PATH\":\"/home/cube/.config/herdr/herdr.sock\"}"
 
-wait_ready() {
-  attempt=0
-  while [ "$attempt" -lt 60 ]; do
-    state=$(aws_ bedrock-agentcore-control get-agent-runtime --agent-runtime-id "$1" --query status --output text 2>/dev/null || echo UNKNOWN)
-    case "$state" in
-      READY) return 0 ;;
-      CREATE_FAILED|UPDATE_FAILED)
-        reason=$(aws_ bedrock-agentcore-control get-agent-runtime --agent-runtime-id "$1" --query failureReason --output text 2>/dev/null || true)
-        die "runtime $1 is $state ($reason)"
-        ;;
-      DELETING) die "runtime $1 is DELETING; wait for it to disappear, then re-run" ;;
-    esac
-    attempt=$((attempt + 1))
-    sleep 5
-  done
-  die "runtime $1 never reached READY"
-}
-
 if [ -z "$RUNTIME_ID" ]; then
-  ATTEMPT=0
-  while :; do
-    # IAM is eventually consistent, so a role created seconds ago may not be assumable yet -
-    # which surfaces as a create-agent-runtime failure, not an IAM one.
-    if RUNTIME_ID=$(run aws_ bedrock-agentcore-control create-agent-runtime \
-      --agent-runtime-name "$RUNTIME_NAME" \
-      --agent-runtime-artifact "$ARTIFACT" \
-      --role-arn "$ROLE_ARN" \
-      --network-configuration "$NETWORK" \
-      --protocol-configuration "$PROTOCOL" \
-      --lifecycle-configuration "$LIFECYCLE" \
-      --filesystem-configurations "$FILESYSTEM" \
-      --environment-variables "$ENVIRONMENT" \
-      --query agentRuntimeId --output text); then break; fi
-    RUNTIME_ID=''
-    ATTEMPT=$((ATTEMPT + 1))
-    [ "$ATTEMPT" -lt 5 ] || die 'create-agent-runtime kept failing'
-    warn "create-agent-runtime failed (attempt $ATTEMPT); IAM may still be propagating. Retrying in 10s."
-    sleep 10
-  done
-  say "Created runtime $RUNTIME_ID"
-  wait_ready "$RUNTIME_ID"
+  # IAM is eventually consistent, so a role created seconds ago may not be assumable yet -
+  # which surfaces as a create-agent-runtime failure, not an IAM one.
+  runtime_create_with_retry "$RUNTIME_NAME" \
+    --agent-runtime-artifact "$ARTIFACT" \
+    --role-arn "$ROLE_ARN" \
+    --network-configuration "$NETWORK" \
+    --protocol-configuration "$PROTOCOL" \
+    --lifecycle-configuration "$LIFECYCLE" \
+    --filesystem-configurations "$FILESYSTEM" \
+    --environment-variables "$ENVIRONMENT"
 else
   say "Runtime $RUNTIME_NAME already exists as $RUNTIME_ID"
 fi
@@ -350,18 +300,14 @@ fi
 MMDS=$(aws_ bedrock-agentcore-control get-agent-runtime --agent-runtime-id "$RUNTIME_ID" \
   --query 'metadataConfiguration.requireMMDSV2' --output text 2>/dev/null || echo None)
 if [ "$MMDS" != 'True' ]; then
-  run aws_ bedrock-agentcore-control update-agent-runtime \
-    --agent-runtime-id "$RUNTIME_ID" \
+  runtime_enable_mmdsv2 "$RUNTIME_ID" \
     --agent-runtime-artifact "$ARTIFACT" \
     --role-arn "$ROLE_ARN" \
     --network-configuration "$NETWORK" \
     --protocol-configuration "$PROTOCOL" \
     --lifecycle-configuration "$LIFECYCLE" \
     --filesystem-configurations "$FILESYSTEM" \
-    --environment-variables "$ENVIRONMENT" \
-    --metadata-configuration "$METADATA" >/dev/null
-  say 'Enabled MMDSv2'
-  wait_ready "$RUNTIME_ID"
+    --environment-variables "$ENVIRONMENT"
 else
   say 'MMDSv2 already enabled'
 fi

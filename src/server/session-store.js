@@ -295,7 +295,6 @@ export function createSessionStore({
 
   return {
     statePath,
-    waitForMount: (timeoutMs) => waitForMount(mount, timeoutMs),
     restore,
     async appendLog(line) {
       const target = statePath('boot.log');

@@ -37,6 +37,8 @@ HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 INFRA=$(CDPATH= cd -- "$HERE/.." && pwd)
 POLICY="$INFRA/policies/efs-filesystem-policy.json"
 
+. "$HERE/aws-common.sh"
+
 MODE=apply
 DRY_RUN=0
 case "${1:-}" in
@@ -46,17 +48,7 @@ case "${1:-}" in
   *) printf 'usage: %s [--dry-run | --rollback]\n' "$0" >&2; exit 2 ;;
 esac
 
-say() { printf '\033[36m>\033[0m %s\n' "$1"; }
-warn() { printf '\033[33m!\033[0m %s\n' "$1" >&2; }
-die() { printf '\033[31mx\033[0m %s\n' "$1" >&2; exit 1; }
-run() { printf '\033[35m$\033[0m %s\n' "$*" >&2; "$@"; }
-aws_() { aws --region "$REGION" "$@"; }
-
-command -v aws >/dev/null 2>&1 || die 'the aws cli is not installed'
-CALLER=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) \
-  || die 'no usable AWS credentials'
-[ "$CALLER" = "$ACCOUNT" ] \
-  || die "credentials are for account $CALLER but this script targets $ACCOUNT"
+aws_verify_account
 [ -f "$POLICY" ] || die "missing $POLICY"
 aws_ efs describe-file-systems --file-system-id "$EFS_FS" >/dev/null 2>&1 \
   || die "filesystem $EFS_FS does not exist"

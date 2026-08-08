@@ -13,7 +13,7 @@
 import { execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
+import { parseArgs as parseNodeArgs, promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
@@ -625,30 +625,37 @@ function sleep(ms) {
 }
 
 function readOptions(argv) {
-  const flags = new Map();
-  for (let at = 0; at < argv.length; at += 1) {
-    const [name, inline] = argv[at].replace(/^--/, '').split('=');
-    if (inline !== undefined) flags.set(name, inline);
-    else if (argv[at + 1] && !argv[at + 1].startsWith('--')) flags.set(name, argv[at += 1]);
-    else flags.set(name, 'true');
-  }
-  const list = (name) => new Set((flags.get(name) || '').split(',').filter(Boolean));
+  const stringOptions = [
+    'base', 'out', 'baseline', 'only', 'skip', 'image', 'herdr', 'session-json',
+    'agent-cmd', 'boot-timeout', 'pane-timeout', 'invoke-timeout', 'agent-timeout',
+    'size-budget',
+  ];
+  const { values } = parseNodeArgs({
+    args: argv,
+    allowPositionals: true,
+    strict: false,
+    options: {
+      ...Object.fromEntries(stringOptions.map((name) => [name, { type: 'string' }])),
+      'after-restart': { type: 'boolean' },
+    },
+  });
+  const list = (name) => new Set(String(values[name] || '').split(',').filter(Boolean));
   return {
-    base: (flags.get('base') || 'http://127.0.0.1:8080').replace(/\/$/, ''),
-    out: path.resolve(flags.get('out') || path.join(here, 'results-local.json')),
-    baseline: path.resolve(flags.get('baseline') || path.join(here, 'local-baseline.json')),
-    afterRestart: flags.has('after-restart'),
+    base: String(values.base || 'http://127.0.0.1:8080').replace(/\/$/, ''),
+    out: path.resolve(values.out || path.join(here, 'results-local.json')),
+    baseline: path.resolve(values.baseline || path.join(here, 'local-baseline.json')),
+    afterRestart: values['after-restart'] !== undefined,
     only: list('only'),
     skip: list('skip'),
-    image: flags.get('image') || 'coding-cube-spike:dev',
-    herdr: flags.get('herdr') || '/usr/local/bin/herdr',
-    sessionJson: flags.get('session-json') || '',
-    agentCmd: flags.get('agent-cmd') || 'claude',
-    bootTimeout: Number(flags.get('boot-timeout') || 180_000),
-    paneTimeout: Number(flags.get('pane-timeout') || 15_000),
-    invokeTimeout: Number(flags.get('invoke-timeout') || 200_000),
-    agentTimeout: Number(flags.get('agent-timeout') || 45_000),
-    sizeBudget: Number(flags.get('size-budget') || 1_800_000_000),
+    image: values.image || 'coding-cube-spike:dev',
+    herdr: values.herdr || '/usr/local/bin/herdr',
+    sessionJson: values['session-json'] || '',
+    agentCmd: values['agent-cmd'] || 'claude',
+    bootTimeout: Number(values['boot-timeout'] || 180_000),
+    paneTimeout: Number(values['pane-timeout'] || 15_000),
+    invokeTimeout: Number(values['invoke-timeout'] || 200_000),
+    agentTimeout: Number(values['agent-timeout'] || 45_000),
+    sizeBudget: Number(values['size-budget'] || 1_800_000_000),
     historyToken: '',
   };
 }

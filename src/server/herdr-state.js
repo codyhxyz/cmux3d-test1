@@ -1,19 +1,16 @@
 import { execFile } from 'node:child_process';
 import net from 'node:net';
 import { promisify } from 'node:util';
+import {
+  clampFaceCount,
+  DEFAULT_FACE_COUNT,
+  MAX_FACE_COUNT,
+  MIN_FACE_COUNT,
+} from '../../public/app/face-count.js';
+
+export { clampFaceCount, DEFAULT_FACE_COUNT, MAX_FACE_COUNT, MIN_FACE_COUNT } from '../../public/app/face-count.js';
 
 const execFileAsync = promisify(execFile);
-
-// Six faces is the square prism the product shipped with and the count a user who
-// never touches the setting keeps forever.
-export const DEFAULT_FACE_COUNT = 6;
-export const MIN_FACE_COUNT = 6;
-// Measured, not assumed. AgentCore allows ten concurrent interactive shells per
-// runtime SESSION — spike/RESULTS.md T-10, where twelve shells across two sessions on
-// one runtime is what disproved the docs' "per runtime" reading. One workspace is one
-// session, so one workspace can never show more than ten faces. This number is that
-// limit and nothing else; do not raise it without re-measuring.
-export const MAX_FACE_COUNT = 10;
 
 const EVENT_TYPES = [
   'workspace.renamed',
@@ -27,17 +24,6 @@ const EVENT_TYPES = [
   'pane.agent_detected',
 ];
 export const DEFAULT_WORKSPACE = 'Coding Cube';
-
-// A count out of range is clamped and reported, never fatal. It arrives from a
-// browser control, and a stale or hand-edited client asking for twelve should get ten
-// and be told so rather than a rejection and no terminals at all.
-export function clampFaceCount(value, fallback = DEFAULT_FACE_COUNT) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return { faces: fallback, requested: null, clamped: false };
-  const requested = Math.trunc(number);
-  const faces = Math.min(MAX_FACE_COUNT, Math.max(MIN_FACE_COUNT, requested));
-  return { faces, requested, clamped: faces !== requested };
-}
 
 // faceCount null means "however many Face tabs exist", floored at MIN_FACE_COUNT so a
 // workspace that has lost a tab still fails closed exactly as it always did instead of

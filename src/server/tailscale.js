@@ -4,8 +4,6 @@ import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 const FALLBACK_BINARIES = ['/Applications/Tailscale.app/Contents/MacOS/Tailscale', '/usr/bin/tailscale'];
-// `tailscale serve --bg <port>` landed in 1.56; older releases need the long form.
-const SERVE_BG_MINIMUM = [1, 56];
 
 export function findTailscale() {
   for (const candidate of FALLBACK_BINARIES) {
@@ -112,17 +110,6 @@ export function parseServeStatus(envelope, port) {
   return { tsOrigin: null, funnel: false };
 }
 
-export function parseVersion(stdout) {
-  const match = /^(\d+)\.(\d+)/.exec(String(stdout || '').trim());
-  return match ? [Number(match[1]), Number(match[2])] : null;
-}
-
-export function supportsServeBackground(version) {
-  if (!version) return false;
-  const [major, minor] = version;
-  return major > SERVE_BG_MINIMUM[0] || (major === SERVE_BG_MINIMUM[0] && minor >= SERVE_BG_MINIMUM[1]);
-}
-
 // Returns the exposure the browser can actually reach, plus everything the CLI told us
 // so index.js can print accurate guidance instead of a raw error.
 // `tailscale serve --bg` blocks for ~30s when Serve is off for the tailnet, so it
@@ -139,38 +126,4 @@ export async function offerServe(port) {
 
   const served = parseServeStatus(await json(binary, ['serve', 'status', '--json']), port);
   return { tsOrigin: served.tsOrigin, funnel: served.funnel, enableUrl: null };
-}
-
-export async function detectExposure({ optIn = false, port } = {}) {
-  const binary = findTailscale();
-  const status = parseStatus(await json(binary, ['status', '--json']));
-  if (!status?.running) return { active: false, tsOrigin: null, dnsName: null, status, serveCommand: null };
-
-  const serveCommand = `tailscale serve --bg ${port}`;
-  let served = parseServeStatus(await json(binary, ['serve', 'status', '--json']), port);
-
-  if (!served.tsOrigin && optIn) {
-    const version = parseVersion((await run(binary, ['version'], { timeout: 3000 }).catch(() => ({ stdout: '' }))).stdout);
-    if (!status.certDomains.length) {
-      console.log('tailscale: enable HTTPS certificates for this tailnet before exposing (admin console → DNS → HTTPS Certificates)');
-    } else if (!supportsServeBackground(version)) {
-      console.log(`tailscale: version too old for --bg; run this yourself: ${serveCommand}`);
-    } else {
-      try {
-        await run(binary, ['serve', '--bg', String(port)], { timeout: 15_000 });
-        served = parseServeStatus(await json(binary, ['serve', 'status', '--json']), port);
-      } catch (error) {
-        console.log(`tailscale: could not expose port ${port} (${error.message.split('\n')[0]}); run this yourself: ${serveCommand}`);
-      }
-    }
-  }
-
-  return {
-    active: Boolean(served.tsOrigin),
-    tsOrigin: served.tsOrigin,
-    funnel: served.funnel,
-    dnsName: status.dnsName,
-    status,
-    serveCommand,
-  };
 }

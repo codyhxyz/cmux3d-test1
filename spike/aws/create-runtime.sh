@@ -58,6 +58,8 @@ warn() { printf '\033[33m!\033[0m %s\n' "$1" >&2; }
 die() { printf '\033[31m✗\033[0m %s\n' "$1" >&2; teardown >&2; exit 1; }
 # The trace goes to stderr so `run` stays usable inside a command substitution.
 run() { printf '\033[35m$\033[0m %s\n' "$*" >&2; "$@"; }
+aws_() { aws --region "$REGION" "$@"; }
+. "$HERE/runtime-lib.sh"
 
 teardown() {
   [ "$MUTATING" = 1 ] || return 0
@@ -77,13 +79,6 @@ teardown() {
   printf '\n'
 }
 
-version_ge() {
-  awk -v have="$1" -v want="$2" '
-    function num(v,  p) { split(v, p, "."); return p[1] * 1000000 + p[2] * 1000 + p[3] }
-    BEGIN { exit !(num(have) >= num(want)) }
-  '
-}
-
 in_range() {
   case "$1" in ''|*[!0-9]*) return 1 ;; esac
   [ "$1" -ge "$2" ] && [ "$1" -le "$3" ]
@@ -94,7 +89,7 @@ in_range() {
 command -v aws >/dev/null 2>&1 || die "The AWS CLI is required."
 CLI_VERSION=$(aws --version 2>&1 | sed -n 's|^aws-cli/\([0-9][0-9.]*\).*|\1|p')
 [ -n "$CLI_VERSION" ] || die "Could not read a version out of \`aws --version\`."
-version_ge "$CLI_VERSION" "$MIN_CLI" \
+runtime_version_ge "$CLI_VERSION" "$MIN_CLI" \
   || die "AWS CLI $CLI_VERSION cannot express --filesystem-configurations; $MIN_CLI or newer is required. Run \`brew upgrade awscli\`."
 
 # Shapes verified against the bundled botocore model rather than trusted from the docs.
@@ -216,53 +211,20 @@ fi
 run aws iam put-role-policy --role-name "$ROLE_NAME" --policy-name inline \
   --policy-document "file://$HERE/runtime-policy.json"
 
-wait_ready() {
-  attempt=0
-  while [ "$attempt" -lt 60 ]; do
-    state=$(aws bedrock-agentcore-control get-agent-runtime --region "$REGION" \
-      --agent-runtime-id "$1" --query status --output text 2>/dev/null || echo UNKNOWN)
-    case "$state" in
-      READY) return 0 ;;
-      CREATE_FAILED|UPDATE_FAILED)
-        reason=$(aws bedrock-agentcore-control get-agent-runtime --region "$REGION" \
-          --agent-runtime-id "$1" --query failureReason --output text 2>/dev/null || true)
-        die "Runtime $1 is $state ($reason). Check the image (linux/arm64, under 53 layers, numeric USER) and that $ROLE_NAME is assumable — a too-narrow aws:SourceArn in runtime-trust.json fails exactly here."
-        ;;
-      DELETING)
-        die "Runtime $1 is DELETING. Wait for it to disappear, then re-run."
-        ;;
-    esac
-    attempt=$((attempt + 1))
-    sleep 5
-  done
-  die "Runtime $1 never reached READY."
-}
+RUNTIME_FAILURE_HINT="Check the image (linux/arm64, under 53 layers, numeric USER) and that $ROLE_NAME is assumable — a too-narrow aws:SourceArn in runtime-trust.json fails exactly here."
+RUNTIME_CREATE_FAILURE='create-agent-runtime kept failing.'
 
 if [ -z "$RUNTIME_ID" ]; then
   # IAM is eventually consistent, so a role created seconds ago may not be
-  # assumable yet — and that shows up as a create-agent-runtime failure, not an
-  # IAM one.
-  attempt=0
-  while :; do
-    if RUNTIME_ID=$(run aws bedrock-agentcore-control create-agent-runtime \
-      --region "$REGION" \
-      --agent-runtime-name "$RUNTIME_NAME" \
-      --agent-runtime-artifact "$ARTIFACT" \
-      --role-arn "$ROLE_ARN" \
-      --network-configuration "$NETWORK" \
-      --protocol-configuration "$PROTOCOL" \
-      --lifecycle-configuration "$LIFECYCLE" \
-      --filesystem-configurations "$FILESYSTEM" \
-      --environment-variables "$ENVIRONMENT" \
-      --query agentRuntimeId --output text); then break; fi
-    RUNTIME_ID=''
-    attempt=$((attempt + 1))
-    [ "$attempt" -lt 5 ] || die 'create-agent-runtime kept failing.'
-    warn "create-agent-runtime failed (attempt $attempt); IAM may still be propagating. Retrying in 10s."
-    sleep 10
-  done
-  say "Created runtime $RUNTIME_ID"
-  wait_ready "$RUNTIME_ID"
+  # assumable yet — and that shows up as a create-agent-runtime failure, not an IAM one.
+  runtime_create_with_retry "$RUNTIME_NAME" \
+    --agent-runtime-artifact "$ARTIFACT" \
+    --role-arn "$ROLE_ARN" \
+    --network-configuration "$NETWORK" \
+    --protocol-configuration "$PROTOCOL" \
+    --lifecycle-configuration "$LIFECYCLE" \
+    --filesystem-configurations "$FILESYSTEM" \
+    --environment-variables "$ENVIRONMENT"
 fi
 
 # requireMMDSV2 is not a member of CreateAgentRuntime — it exists only on
@@ -271,18 +233,14 @@ fi
 # This runs immediately after create because an update bumps the runtime version and a
 # version bump WIPES managed session storage: do it now, while there is none to lose.
 if [ "$MMDS_OK" = 0 ]; then
-  run aws bedrock-agentcore-control update-agent-runtime --region "$REGION" \
-    --agent-runtime-id "$RUNTIME_ID" \
+  runtime_enable_mmdsv2 "$RUNTIME_ID" \
     --agent-runtime-artifact "$ARTIFACT" \
     --role-arn "$ROLE_ARN" \
     --network-configuration "$NETWORK" \
     --protocol-configuration "$PROTOCOL" \
     --lifecycle-configuration "$LIFECYCLE" \
     --filesystem-configurations "$FILESYSTEM" \
-    --environment-variables "$ENVIRONMENT" \
-    --metadata-configuration "$METADATA" >/dev/null
-  say 'Enabled MMDSv2'
-  wait_ready "$RUNTIME_ID"
+    --environment-variables "$ENVIRONMENT"
 fi
 
 # ------------------------------------------------------------------ verify --
