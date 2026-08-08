@@ -164,10 +164,27 @@ assert.doesNotMatch(await readFile('public/app/connection.js', 'utf8'), /tail47c
 // `npm start` with CUBE_RUNTIME_ARN serves the Cube and the minter on one origin, so a
 // page it served must ask itself. Measured: without this the page on :8064 fetched
 // :8787 and Chrome refused it for CORS, silently against whichever runtime was there.
+const mainSource = await readFile('public/app/main.js', 'utf8');
 assert.match(
-  await readFile('public/app/main.js', 'utf8'),
-  /resolveCloudBase[\s\S]{0,600}location\.origin/,
+  mainSource,
+  /resolveCloudBase[\s\S]{0,1600}location\.origin/,
   'a Cube served by the minter must mint from its own origin, not the standalone port',
+);
+// The other half, and the one MULTI_USER.md warns about: the probe must not outvote an
+// operator who pointed the cloud at a specific API. Only the built-in default gets
+// superseded by a minter answering here, or deploying the multi-user mint endpoint would
+// silently keep using whatever serves the page.
+assert.match(
+  mainSource,
+  /fallback !== DEFAULT_AGENTCORE_ORIGIN/,
+  'an explicitly configured cloud origin must win over the same-origin probe',
+);
+// Pinning the session server-side is only safe if the client adopts the id the 409 carries;
+// without this every call 409s forever and cloud mode is simply broken.
+assert.match(
+  mainSource,
+  /status === 409[\s\S]{0,200}adoptSessionId/,
+  'a 409 from a pinned minter must be adopted, not just reported',
 );
 // faces[].paneId is the join key the browser uses against busy.panes; a minter that
 // drops one half leaves "Agent working — sleep paused" permanently unreachable.

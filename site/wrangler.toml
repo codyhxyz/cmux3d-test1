@@ -12,3 +12,8 @@ compatibility_date = "2026-07-19"
 #   CUBE_AWS_ACCESS_KEY_ID  CUBE_AWS_SECRET_ACCESS_KEY  CUBE_PAIRING_TOKEN
 [vars]
 CUBE_RUNTIME_ARN = "arn:aws:bedrock-agentcore:us-east-1:808175385344:runtime/coding_cube_nat-3RJI162JL3"
+# The server owns the session id. Without this, a browser that has lost its localStorage names
+# a fresh one and boots a SECOND microVM onto the same EFS workspace — a second $0.217/hour and,
+# worse, two herdr servers sharing one socket directory that lives on that filesystem.
+# Safe only because main.js adopts the id a 409 carries; see adoptSessionId().
+CUBE_SESSION_POLICY = "pinned"

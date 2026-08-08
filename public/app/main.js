@@ -95,17 +95,46 @@ const lifecycle = createWorkspaceLifecycle({
 });
 lifecycle.update({ faceCount });
 
+// Memoised, and that is load-bearing rather than an optimisation: without it the private
+// browsing branch mints a *different* id on every call, so nothing that compares this against
+// anything — adoptSessionId's termination guard especially — could ever agree with itself.
+let cubeSessionId = null;
 function agentcoreSessionId() {
+  if (cubeSessionId) return cubeSessionId;
   try {
-    const saved = localStorage.getItem(AGENTCORE_SESSION_KEY);
-    if (saved) return saved;
-    const minted = createSessionId('cube-');
-    localStorage.setItem(AGENTCORE_SESSION_KEY, minted);
-    return minted;
+    cubeSessionId = localStorage.getItem(AGENTCORE_SESSION_KEY);
+    if (!cubeSessionId) {
+      cubeSessionId = createSessionId('cube-');
+      localStorage.setItem(AGENTCORE_SESSION_KEY, cubeSessionId);
+    }
   } catch {
     // Private browsing: a per-tab workspace is still better than no terminal.
-    return createSessionId('cube-');
+    cubeSessionId = createSessionId('cube-');
   }
+  return cubeSessionId;
+}
+
+// Take the server's session id and rebuild against it. The id is baked into the transport at
+// construction — it keys the scrollback store and rides every mint — so it cannot be swapped
+// underneath a live one. Deferred, because this runs inside the ensureWorkspace() the
+// transport is still awaiting, exactly like adoptServedFaceCount().
+//
+// Terminates rather than loops: the new id is written to storage first, so the rebuilt
+// transport reads it back and the next answer matches.
+function adoptSessionId(next) {
+  if (next === agentcoreSessionId()) return;
+  cubeSessionId = next;
+  try {
+    localStorage.setItem(AGENTCORE_SESSION_KEY, next);
+  } catch {
+    // Private browsing. The in-memory value above still holds for this tab's lifetime, which
+    // is what stops the rebuild below from 409ing straight back into here.
+  }
+  setTimeout(() => {
+    fleet.detach();
+    fleet.setTransport(transportForHost());
+    connectHost();
+  }, 0);
 }
 
 // The minter serves the Cube, so a page that came from one is already same-origin with
@@ -116,6 +145,12 @@ function agentcoreSessionId() {
 let cloudBase = null;
 async function resolveCloudBase(fallback) {
   if (cloudBase) return cloudBase;
+  // An operator who pointed the cloud at a specific API — a multi-user mint endpoint, say —
+  // means it, and the probe below must not quietly outvote them. Only the built-in default
+  // is superseded by a minter answering on this origin. MULTI_USER.md warns about exactly
+  // this: "a deployment that ever put the page behind the same host as the API would
+  // silently take the same-origin branch instead", which is now the shipped arrangement.
+  if (fallback && fallback !== DEFAULT_AGENTCORE_ORIGIN) return (cloudBase = fallback);
   try {
     const response = await fetch('/session', { signal: AbortSignal.timeout(5000) });
     // Checked on the body, not the status: a static host that answers unknown paths
@@ -151,6 +186,10 @@ function transportForHost(host = activeHost()) {
     });
     const body = await response.json().catch(() => null);
     if (!response.ok) {
+      // Under CUBE_SESSION_POLICY=pinned the server owns the session id and answers 409 with
+      // the one to use. Adopting it is what makes pinning safe to turn on: without it every
+      // call 409s forever. Costs one failed cycle, then holds for the life of the browser.
+      if (response.status === 409 && body?.sessionId) adoptSessionId(body.sessionId);
       const error = new Error(body?.error || `minter answered ${response.status}`);
       error.code = body?.code;
       throw error;
