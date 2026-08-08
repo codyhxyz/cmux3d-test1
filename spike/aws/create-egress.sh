@@ -457,6 +457,29 @@ else
     say "Added $NAT_ROLE to instance profile $NAT_ROLE"
   fi
 
+  # -- SUPERSEDED ---------------------------------------------------------------
+  # What is actually deployed is fck-nat (github.com/AndrewGuenther/fck-nat) in an Auto
+  # Scaling group of one, attaching a fixed ENI that the route table points at. A maintained
+  # AMI solving this exact problem, and it self-heals: kill the instance and the group
+  # replaces it, the replacement reclaims the ENI unprompted, and the route never changes.
+  # Verified by killing it. The hand-rolled path below does none of that — if its box dies,
+  # egress stays dead until a human notices.
+  #
+  # It is kept rather than deleted because the rollback story and the cost comparison were
+  # written against it, but running it now would build a SECOND NAT and route to the one
+  # WITHOUT self-healing. So it refuses.
+  #
+  # This check sits above the Elastic IP allocation deliberately. It was below it first, and
+  # the aborted run leaked a $3.65/month address before reaching the guard — a refusal that
+  # costs money is not a refusal.
+  if aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$NAT_TAG" \
+    --query 'AutoScalingGroups[0].AutoScalingGroupName' --output text 2>/dev/null | grep -q "$NAT_TAG"; then
+    die "fck-nat is already serving egress from the $NAT_TAG Auto Scaling group. This script's
+  hand-rolled instance path is superseded and would build a second NAT and route to it,
+  losing self-healing. To change the deployed NAT, edit its launch template; to tear it down,
+  delete the ASG, the launch template, the ENI and the Elastic IP."
+  fi
+
   # -- Elastic IP, allocated before the instance so it can be attached at once --
   NAT_EIP=$(aws_ ec2 describe-addresses --filters Name=tag:Name,Values="$NAT_TAG" \
     --query 'Addresses[0].AllocationId' --output text 2>/dev/null || echo None)
