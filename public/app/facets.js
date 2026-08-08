@@ -1,6 +1,11 @@
 // The cube is a prism: N-2 side panels evenly spaced around the vertical axis, plus a
 // Crown and a Keel cap. At six faces that is a square prism, which is the cube the
-// product shipped with, down to the names, codes and orbit angles below.
+// product shipped with, down to the names and orbit angles below.
+//
+// Faces carried a code as well — F-00, A-01 — rendered under the name on the panel and in
+// the face rail. It was a placeholder: the element holding it is where the Herdr session
+// label goes once a face attaches, so the code was only ever what the face said when there
+// was nothing true to say about it. It said the face index twice.
 
 import {
   clampFaceCount,
@@ -25,8 +30,8 @@ const terminalTheme = {
 // renames a face or moves an agent onto a different panel — the sides that appear take
 // the unused indices at the end. Face index f is always shell `face-${f + 1}`.
 const CAPS = [
-  { face: 4, name: 'Crown', code: 'C-04', view: { x: -96, y: 0 }, angle: 90 },
-  { face: 5, name: 'Keel', code: 'K-05', view: { x: 82, y: 0 }, angle: -90 },
+  { face: 4, name: 'Crown', view: { x: -96, y: 0 }, angle: 90 },
+  { face: 5, name: 'Keel', view: { x: 82, y: 0 }, angle: -90 },
 ];
 
 // The sides in the order they sit around the drum, clockwise from the bow. With four
@@ -34,14 +39,14 @@ const CAPS = [
 // Fore 0deg, Starboard 90deg, Aft 180deg, Port -90deg. Beyond four the metaphor stops
 // being a compass, so the extra sides are named for parts of a hull instead.
 const SIDES = [
-  { face: 0, name: 'Fore', code: 'F-00' },
-  { face: 2, name: 'Starboard', code: 'S-02' },
-  { face: 1, name: 'Aft', code: 'A-01' },
-  { face: 3, name: 'Port', code: 'P-03' },
-  { face: 6, name: 'Beam', code: 'B-06' },
-  { face: 7, name: 'Quarter', code: 'Q-07' },
-  { face: 8, name: 'Waist', code: 'W-08' },
-  { face: 9, name: 'Transom', code: 'T-09' },
+  { face: 0, name: 'Fore' },
+  { face: 2, name: 'Starboard' },
+  { face: 1, name: 'Aft' },
+  { face: 3, name: 'Port' },
+  { face: 6, name: 'Beam' },
+  { face: 7, name: 'Quarter' },
+  { face: 8, name: 'Waist' },
+  { face: 9, name: 'Transom' },
 ];
 
 // Out of range is clamped, never fatal: this value reaches us from a slider, from

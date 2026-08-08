@@ -792,7 +792,7 @@ function renderFaces() {
 
     const header = document.createElement('header');
     header.innerHTML = `
-      <span><i></i><strong>${facet.name}</strong><small data-session-label>${facet.code}</small></span>
+      <span><i></i><strong>${facet.name}</strong><small data-session-label></small></span>
       <b data-agent-status></b>
     `;
     const surface = document.createElement('div');
@@ -814,7 +814,7 @@ function renderPorts() {
     button.dataset.index = String(facet.face + 1).padStart(2, '0');
     button.setAttribute('aria-label', `Focus ${facet.name} terminal`);
     button.setAttribute('aria-pressed', 'false');
-    button.innerHTML = `<span><strong>${facet.name}</strong><small data-session-label>${facet.code}</small></span>`;
+    button.innerHTML = `<span><strong>${facet.name}</strong><small data-session-label></small></span>`;
     button.addEventListener('click', () => {
       if (space.focused === facet.face) space.release();
       else space.focus(facet.face);
