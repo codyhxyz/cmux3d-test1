@@ -225,8 +225,12 @@ The NAT gateway is **~$32.40/month fixed**, plus $0.045/GB processed. That is ro
 everything else (no 1 GB cap, survives deploys, full POSIX, compute billed only while working), and the
 NAT is shared across *all* users, so the economics invert as soon as there is more than one.
 
-Two levers if the fixed cost matters: a `t4g.nano` NAT instance is ~$3/month (stubbed but not
-implemented in `create-egress.sh`), or stay on session storage while workspaces are disposable.
+Two levers if the fixed cost matters: a `t4g.nano` NAT instance, now implemented in
+`create-egress.sh` behind `CUBE_NAT_MODE=instance` at ~$7.40/month all-in ($3.07 instance +
+$3.65 Elastic IP + $0.64 EBS — the "~$3" figure is only the instance line), or stay on session
+storage while workspaces are disposable. **The instance path is written but not yet measured
+against live AWS**; the rest of this file is. It ships with a `--rollback` that puts
+`0.0.0.0/0` back on the managed gateway in one call.
 
 ## Other measured facts
 

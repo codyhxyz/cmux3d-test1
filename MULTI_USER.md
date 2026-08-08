@@ -237,9 +237,14 @@ Which restates the finding from the EFS migration: **at one user this architectu
 save money** — the NAT costs about what an always-on `t4g.medium` does. The economics invert
 at two users and are essentially flat from ten onwards.
 
-Two levers not pulled: a `t4g.nano` NAT instance is ~$3/month (stubbed, not implemented, in
-`spike/aws/create-egress.sh`), and EFS Infrequent Access lifecycle policies would cut storage
-by roughly 90% for workspaces nobody has touched in 30 days.
+Two levers, one of them now built. `CUBE_NAT_MODE=instance sh spike/aws/create-egress.sh`
+replaces the gateway with a `t4g.nano` NAT instance: ~$7.40/month all-in, not the ~$3 usually
+quoted, because the instance is $3.07 and its Elastic IP is another $3.65. That still takes
+the fixed line from $32.40 to $7.40 and drops the $0.045/GB processing fee, at the cost of no
+automatic failover, bandwidth capped by the instance type, and a box you patch yourself —
+`--rollback` returns to the managed gateway in one call. The other lever, untouched: EFS
+Infrequent Access lifecycle policies would cut storage by roughly 90% for workspaces nobody
+has touched in 30 days.
 
 `maxLifetime` is what bounds a stuck session. At the default 28,800 s that is ~$1.76 of worst
 case per user per incident.
