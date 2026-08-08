@@ -524,6 +524,15 @@ else
   run aws_ ec2 modify-instance-attribute --instance-id "$NAT_INSTANCE" --no-source-dest-check
   say "Source/dest check disabled on $NAT_INSTANCE"
 
+  # Measured, on the first real run: AssociateAddress fails with IncorrectInstanceState while
+  # the instance is `pending` — "the pending-instance-running instance ... is not in a valid
+  # state for this operation". The comment this replaces claimed allocating the EIP before
+  # run-instances meant it could attach during pending. It cannot. Wait for `running` first.
+  if [ "$DRY_RUN" != 1 ]; then
+    say "Waiting for $NAT_INSTANCE to reach running before attaching the Elastic IP"
+    aws_ ec2 wait instance-running --instance-ids "$NAT_INSTANCE"
+  fi
+
   ASSOC_ENI=$(aws_ ec2 describe-addresses --allocation-ids "$NAT_EIP" \
     --query 'Addresses[0].NetworkInterfaceId' --output text 2>/dev/null || echo None)
   if [ "$ASSOC_ENI" = "$NAT_ENI" ]; then
