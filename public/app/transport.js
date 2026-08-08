@@ -19,7 +19,7 @@ import { activeHost, hostHttp, hostWebSocket } from './connection.js';
  * @typedef {Object} CubeTransport
  * @property {string} id
  * @property {string} name
- * @property {(face: number, slot: number) => CubeSocket} openTerminal  face is 0..5, Cube-native
+ * @property {(face: number, slot: number) => CubeSocket} openTerminal  face is 0..N-1, Cube-native
  * @property {(cols: number, rows: number) => CubeControlFrame} encodeResize
  * @property {() => Promise<{ok: boolean, reason?: string}>} probe
  */
@@ -35,12 +35,14 @@ const SHUTDOWN = 0xff;
 // AgentCore's 256 KB replay buffer carries output missed *while disconnected*, not the
 // screen, so a fresh tab attaching to a live workspace gets nothing (measured: a marker
 // echoed before a drop was absent after reconnect). These bound a browser-local copy of
-// each face's tail: six faces at 48k characters is ~576 KB of UTF-16 in localStorage,
+// each face's tail: ten faces at 48k characters is ~960 KB of UTF-16 in localStorage,
 // well inside the 5 MB every engine allows, and the record cap stops old sessions from
 // accumulating forever.
 const SCROLLBACK_NAMESPACE = 'coding-cube.scrollback.v1';
 const SCROLLBACK_MAX_CHARS = 48_000;
-const SCROLLBACK_MAX_RECORDS = 12;
+// Room for a full ten-face cube plus a previous session's tail, rather than a widened
+// cube evicting its own history the moment the tenth face writes.
+const SCROLLBACK_MAX_RECORDS = 16;
 const SCROLLBACK_TTL_MS = 24 * 60 * 60 * 1000;
 const SCROLLBACK_FLUSH_MS = 1500;
 
@@ -58,6 +60,26 @@ const AWS_LOGIN_REQUIRED = 'AWS_LOGIN_REQUIRED';
 const SESSION_ID_MIN = 33;
 const SESSION_ID_MAX = 256;
 const SHELL_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
+
+// The cube is a prism: N-2 side panels plus two caps. Six is the square prism the
+// product shipped with and the count nobody who ignores the setting will ever leave.
+export const DEFAULT_FACE_COUNT = 6;
+export const MIN_FACE_COUNT = 6;
+// Measured, not assumed. AgentCore allows ten concurrent interactive shells per runtime
+// SESSION (spike/RESULTS.md T-10 — twelve shells across two sessions on one runtime is
+// what disproved the docs' "per runtime" reading). One workspace is one session, so an
+// eleventh face has nowhere to open. This mirrors MAX_FACE_COUNT in herdr-state.js; the
+// browser cannot import server code, so the two declare the same measured fact twice.
+export const MAX_FACE_COUNT = 10;
+
+/** Clamp rather than reject: a stale setting must cost a face, never the whole cube. */
+export function clampFaceCount(value, fallback = DEFAULT_FACE_COUNT) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return { faces: fallback, requested: null, clamped: false };
+  const requested = Math.trunc(number);
+  const faces = Math.min(MAX_FACE_COUNT, Math.max(MIN_FACE_COUNT, requested));
+  return { faces, requested, clamped: faces !== requested };
+}
 
 const { CONNECTING = 0, OPEN = 1, CLOSED = 3 } = globalThis.WebSocket || {};
 const encoder = new TextEncoder();
@@ -98,10 +120,14 @@ export function createOriginTransport(host = activeHost()) {
   };
 }
 
-/** Native InvokeAgentRuntimeCommandShell. faceOffset 1 => shellId "face-1".."face-6". */
+/**
+ * Native InvokeAgentRuntimeCommandShell. faceOffset 1 => shellId "face-1".."face-N",
+ * N being 6..10. The offset rule is unchanged at every count.
+ */
 export function createShellTransport({
   mintUrl,
   ensureWorkspace,
+  faces = DEFAULT_FACE_COUNT,
   sessionId = createSessionId(),
   faceOffset = 1,
   heartbeatMs = 30_000,
@@ -127,11 +153,18 @@ export function createShellTransport({
   }
 
   const workspace = createWorkspaceGate(ensureWorkspace);
+  const faceCount = clampFaceCount(faces).faces;
 
   return {
     id: `agentcore:${sessionId}`,
     name,
     sessionId,
+    // The gateway is the authority on how many faces exist — ensureWorkspace() is the
+    // call that asks it — so this reports what was served and only falls back to the
+    // configured count before the first answer arrives. Never a second source of truth.
+    get faces() {
+      return workspace.state?.faces.length || faceCount;
+    },
     workspace,
     scrollback,
     shellIdFor: (face, slot = 0) => shellIdFor(face, slot, faceOffset),
@@ -172,7 +205,7 @@ export function createShellTransport({
 }
 
 /**
- * One /invocations call per transport, shared by all six faces and awaited by each of
+ * One /invocations call per transport, shared by every face and awaited by each of
  * them. A rejection is deliberately not cached: no shell may open until one succeeds,
  * but the next face must be allowed to try again.
  */
@@ -718,7 +751,7 @@ class ScrollbackStore {
     this.#writeEntries(this.#entries().filter((entry) => !(entry.shellId === shellId && entry.sessionId === this.#sessionId)));
   }
 
-  /** Drop expired and surplus records so six faces cannot grow into a quota failure. */
+  /** Drop expired and surplus records so ten faces cannot grow into a quota failure. */
   prune() {
     const cutoff = this.#now() - this.#ttlMs;
     const kept = [];
@@ -902,7 +935,16 @@ function formatAge(ageMs) {
 }
 
 function shellIdFor(face, slot, faceOffset) {
-  // Only slot 0 fits the ten-shells-per-runtime ceiling, but the id stays
+  // The ceiling is enforced here, at the one place a face becomes a shell id, because
+  // the alternative is finding out at the WebSocket handshake: AgentCore accepts the
+  // presign and then refuses the eleventh shell on the socket, which reaches the user
+  // as one face that simply never opens. A RangeError names the real limit instead.
+  if (!Number.isInteger(face) || face < 0 || face >= MAX_FACE_COUNT) {
+    throw new RangeError(
+      `face must be 0..${MAX_FACE_COUNT - 1}; got ${face}. AgentCore allows ${MAX_FACE_COUNT} concurrent shells per runtime session`,
+    );
+  }
+  // Only slot 0 fits the ten-shells-per-session ceiling, but the id stays
   // deterministic either way so a reload reclaims its shells instead of doubling
   // them and fighting itself with close 4000.
   const id = slot ? `face-${face + faceOffset}-slot-${slot}` : `face-${face + faceOffset}`;

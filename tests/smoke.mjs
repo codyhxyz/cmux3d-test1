@@ -37,7 +37,18 @@ import {
 } from '../public/app/space.js';
 import { VENDOR_ASSETS } from '../src/vendor-assets.js';
 import { readServerOptions } from '../src/server/config.js';
-import { cubeSetupPlan, selectCubeFaces } from '../src/server/herdr-state.js';
+import { createCloudRoutes } from '../src/server/cloud/routes.js';
+import {
+  clampFaceCount,
+  countCubeFaces,
+  cubePaneIds,
+  cubeSetupPlan,
+  DEFAULT_FACE_COUNT,
+  ensureCubeWorkspace,
+  MAX_FACE_COUNT,
+  MIN_FACE_COUNT,
+  selectCubeFaces,
+} from '../src/server/herdr-state.js';
 import { browserOriginAllowed } from '../src/server/origin.js';
 import { createRuntime } from '../src/server/runtime.js';
 import { createTailnetIdentity, parseServeIdentity, parseServeStatus, parseStatus, parseWhois, supportsServeBackground } from '../src/server/tailscale.js';
@@ -47,6 +58,7 @@ await checkHerdrStateEndpoint();
 await checkGatewayOnly();
 await checkRenamedBrowserStore();
 await checkAwsLoginFailStop();
+await checkFaceCount();
 
 assert.equal(commandKeyInput({ key: 'ArrowLeft', metaKey: true }), '\x01', 'command-left should move to the start of the shell input');
 assert.equal(commandKeyInput({ key: 'ArrowRight', metaKey: true }), '\x05', 'command-right should move to the end of the shell input');
@@ -617,12 +629,24 @@ try {
   face4.input('printf "probe:%s:%s\\n" "$CODING_CUBE_FACE" "$CODING_CUBE_SLOT"\r');
   await face4.waitFor('probe:4:2');
 
+  // A ten-face cube addresses faces 0..9. Before this the grid clamped anything past
+  // 5 onto face 5, so faces 7 through 10 would all have shared one terminal.
+  const face9 = await openPty(wsBase, 9, 0);
+  face9.input('printf "probe:%s:%s\\n" "$CODING_CUBE_FACE" "$CODING_CUBE_SLOT"\r');
+  await face9.waitFor('probe:9:0');
+  // An eleventh face is clamped onto the tenth rather than opening an eleventh shell:
+  // it lands in face 9's existing session and is handed its scrollback.
+  const face10 = await openPty(wsBase, 10, 0);
+  await face10.waitFor('probe:9:0');
+
   await rejectsInvalidResize(wsBase);
 
   slot0.close();
   replay.close();
   slot1.close();
   face4.close();
+  face9.close();
+  face10.close();
   await waitUntil(() => runtime.terminalGrid.sessions.size === 0);
   assert.equal(runtime.terminalGrid.sessions.size, 0, 'closing the last browser client should detach its proxy');
   console.log('smoke ok');
@@ -630,16 +654,208 @@ try {
   await runtime.stop();
 }
 
-async function checkAwsLoginFailStop() {
-  const previousLocation = globalThis.location;
-  let createShellTransport;
+// transport.js pulls in connection.js, which reads location while it evaluates.
+async function importTransport() {
+  const previous = globalThis.location;
   try {
     globalThis.location = { origin: 'http://127.0.0.1', protocol: 'http:', hash: '', pathname: '/', search: '' };
-    ({ createShellTransport } = await import('../public/app/transport.js'));
+    return await import('../public/app/transport.js');
   } finally {
-    if (previousLocation === undefined) delete globalThis.location;
-    else globalThis.location = previousLocation;
+    if (previous === undefined) delete globalThis.location;
+    else globalThis.location = previous;
   }
+}
+
+// Six faces is a default, not a shape. Everything below is the count being adjustable
+// 6..10 without a user who never touches the setting seeing any difference.
+async function checkFaceCount() {
+  assert.equal(DEFAULT_FACE_COUNT, 6, 'the shipped cube is six faces and stays six for anyone who never asks');
+  assert.equal(MIN_FACE_COUNT, 6, 'below six the shape stops being a cube at all');
+  // Measured, not read off a docs page: spike/RESULTS.md T-10 opened twelve shells
+  // across two sessions on one runtime, which is what proved the cap is per SESSION.
+  // One workspace is one session, so ten is the hard ceiling on faces.
+  assert.equal(MAX_FACE_COUNT, 10, 'AgentCore allows ten concurrent shells per runtime session (spike/RESULTS.md T-10)');
+  assert.deepEqual(clampFaceCount(undefined), { faces: 6, requested: null, clamped: false }, 'a client that never mentions faces must get exactly today\'s cube');
+  assert.deepEqual(clampFaceCount('8'), { faces: 8, requested: 8, clamped: false }, 'the count arrives as a query string and must survive the trip');
+  assert.deepEqual(clampFaceCount(11), { faces: 10, requested: 11, clamped: true }, 'past the ceiling the gateway clamps and says so rather than failing');
+  assert.deepEqual(clampFaceCount(2), { faces: 6, requested: 2, clamped: true }, 'under the floor clamps the same way');
+
+  const { clampFaceCount: clampInBrowser, createShellTransport, MAX_FACE_COUNT: BROWSER_MAX } = await importTransport();
+  assert.equal(BROWSER_MAX, MAX_FACE_COUNT, 'the browser cannot import server code, so both copies of the measured ceiling must agree');
+  // The geometry owns a third copy for the same reason. Three declarations of one
+  // measured fact are three chances to drift; this is the thing that notices.
+  assert.match(
+    await readFile('public/app/facets.js', 'utf8'),
+    new RegExp(`MAX_FACES = ${MAX_FACE_COUNT}\\b`),
+    'the prism geometry, the transport and the gateway must agree on the ten-shell ceiling',
+  );
+  assert.deepEqual(clampInBrowser(11), clampFaceCount(11), 'both sides must clamp identically or the UI and the gateway disagree about what is showing');
+  const transport = createShellTransport({
+    sessionId: 'cube-test-12345678-1234-1234-1234-123456789012',
+    scrollback: null,
+    mintUrl: async () => 'wss://example.test/',
+    ensureWorkspace: async () => ({ state: 'ready', faces: [] }),
+  });
+  assert.equal(transport.faces, 6, 'a transport nobody configured is a six-face cube');
+  assert.equal(transport.shellIdFor(0), 'face-1', 'the faceOffset 1 rule is unchanged');
+  assert.equal(transport.shellIdFor(9), 'face-10', 'the tenth face is face-10, not a new id scheme');
+  assert.throws(
+    () => transport.openTerminal(10),
+    /10 concurrent shells/,
+    'the eleventh shell must be refused here with the real reason, not left to fail at the WebSocket handshake',
+  );
+  assert.equal(createShellTransport({
+    sessionId: 'cube-test-12345678-1234-1234-1234-123456789012',
+    scrollback: null,
+    faces: 12,
+    mintUrl: async () => 'wss://example.test/',
+    ensureWorkspace: async () => ({ state: 'ready', faces: [] }),
+  }).faces, 10, 'a transport asked for twelve faces settles at the ceiling instead of throwing');
+  assert.throws(
+    () => createShellTransport({ mintUrl: async () => 'wss://example.test/' }),
+    /mnt\/workspace/,
+    'ensureWorkspace stays REQUIRED: a shell opened before the mount exists loses all work at idle timeout',
+  );
+
+  // The browser asks for a count on the one call it already makes, and the gateway
+  // hands it to the container. A dropped parameter here is a cube that silently
+  // refuses to widen.
+  const asked = [];
+  const routes = createCloudRoutes({ minter: { prepare: async (options) => { asked.push(options); return { ok: true }; } } });
+  await routes({}, collectResponse(), new URL('http://gateway.test/prepare?sessionId=s&faces=9'), undefined);
+  assert.equal(asked[0].faces, '9', '/prepare must forward the requested face count to the minter');
+  await routes({}, collectResponse(), new URL('http://gateway.test/prepare?sessionId=s'), undefined);
+  assert.equal(asked[1].faces, null, 'a /prepare with no faces parameter must stay exactly the call it is today');
+  const mintSource = await readFile('src/server/cloud/mint.js', 'utf8');
+  assert.match(mintSource, /invokeRuntime\(target, \{ op, faces: request\.faces \}\)/, 'the clamped count must reach the container in the invocation body');
+  assert.match(mintSource, /facesClamped/, 'a clamp the user did not ask for must be reported in the response');
+  assert.match(
+    await readFile('src/server/agentcore.js', 'utf8'),
+    /stateResponse\(op, body\?\.faces\)/,
+    'the container gateway must honour the count the invocation carries',
+  );
+  assert.match(
+    await readFile('src/server/terminal-grid.js', 'utf8'),
+    /FACE_MAX = MAX_FACE_COUNT - 1/,
+    'the grid bound must follow the measured ceiling rather than keep a second copy of it',
+  );
+
+  // Growing and shrinking against a herdr that really mutates its snapshot, so "never
+  // removes" is measured rather than reviewed.
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'coding-cube-faces-'));
+  try {
+    const herdr = await writeFakeHerdr(directory);
+    const six = await ensureCubeWorkspace(herdr.executable, 'Coding Cube', directory);
+    assert.equal(six.length, 6, 'the default is still six tabs and six faces');
+
+    const ten = await ensureCubeWorkspace(herdr.executable, 'Coding Cube', directory, 10);
+    assert.equal(ten.length, 10, 'asking for ten faces must produce ten');
+    assert.deepEqual(ten.slice(0, 6).map(({ paneId }) => paneId), six.map(({ paneId }) => paneId), 'growing must not disturb the faces that were already open');
+
+    const shrunk = await ensureCubeWorkspace(herdr.executable, 'Coding Cube', directory, 6);
+    assert.equal(shrunk.length, 6, 'shrinking renders six faces');
+    // The whole point: Face 9 may hold an agent mid-task. Hiding it is a rendering
+    // decision; closing its tab would destroy work with no way back.
+    assert.equal(await herdr.tabCount(), 10, 'shrinking the cube must never remove a tab');
+    assert.deepEqual(await herdr.creations(), ['1', ...Array.from({ length: 9 }, (_, face) => `Face ${face + 2}`)], 'nothing may be created twice and nothing may be closed');
+
+    const regrown = await ensureCubeWorkspace(herdr.executable, 'Coding Cube', directory, 10);
+    assert.deepEqual(regrown.map(({ paneId }) => paneId), ten.map(({ paneId }) => paneId), 'growing back must reattach the same panes, not fresh ones');
+
+    const envelope = { result: { snapshot: JSON.parse(await readFile(herdr.statePath, 'utf8')) } };
+    assert.equal(countCubeFaces(envelope), 10, 'the tabs that exist are what the workspace holds, whatever is being rendered');
+    assert.equal(selectCubeFaces(envelope, 'Coding Cube', 6).length, 6, 'a rendered cube is exactly the count asked for');
+    // /ping judges panes, and a hidden pane can still hold a working agent. Scoping
+    // sleep to the visible faces would make shrinking the cube a way to sleep a
+    // microVM out from under an agent that is mid-task.
+    assert.equal(cubePaneIds(envelope).length, 10, 'hidden faces must stay inside the scope that keeps the machine awake');
+    // One hidden face whose pane died must not take the six visible ones down with it.
+    const broken = { result: { snapshot: { ...envelope.result.snapshot, panes: envelope.result.snapshot.panes.filter(({ tab_id }) => tab_id !== 'w1:t8') } } };
+    assert.equal(countCubeFaces(broken), 7, 'a face missing its pane ends the count instead of poisoning the snapshot');
+    assert.equal(selectCubeFaces(broken, 'Coding Cube', 6).length, 6, 'a six-face cube must keep rendering while a hidden face is broken');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+
+  assert.deepEqual(
+    cubeSetupPlan({ result: { snapshot: { workspaces: [], tabs: [] } } }, 'Coding Cube', 10),
+    { workspaceId: null, renameTabId: null, createFaces: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] },
+    'a ten-face cube provisions ten tabs on a machine that has never had one',
+  );
+  assert.doesNotMatch(
+    await readFile('src/server/herdr-state.js', 'utf8'),
+    /'tab',\s*'close'/,
+    'nothing in the workspace layer may close a tab: the count is what is rendered, not what exists',
+  );
+}
+
+// A herdr that keeps state, so growing, shrinking and growing back are real
+// transitions rather than three independent snapshots.
+async function writeFakeHerdr(directory) {
+  const statePath = path.join(directory, 'snapshot.json');
+  const logPath = path.join(directory, 'created.log');
+  const scriptPath = path.join(directory, 'herdr.mjs');
+  await writeFile(statePath, JSON.stringify({ workspaces: [], tabs: [], panes: [], agents: [] }));
+  await writeFile(logPath, '');
+  await writeFile(scriptPath, `
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+const STATE = ${JSON.stringify(statePath)};
+const LOG = ${JSON.stringify(logPath)};
+const args = process.argv.slice(2).filter((value, index) => !(index < 2 && (value === '--session' || value === 'default')));
+const snapshot = JSON.parse(readFileSync(STATE, 'utf8'));
+const save = () => writeFileSync(STATE, JSON.stringify(snapshot));
+const option = (name) => args[args.indexOf(name) + 1];
+const addTab = (workspaceId, label) => {
+  const index = snapshot.tabs.length + 1;
+  const tab = { tab_id: 'w1:t' + index, workspace_id: workspaceId, label };
+  snapshot.tabs.push(tab);
+  snapshot.panes.push({ pane_id: 'w1:p' + index, tab_id: tab.tab_id, workspace_id: workspaceId, terminal_id: 'term-' + index });
+  appendFileSync(LOG, label + '\\n');
+  return tab;
+};
+if (args[0] === 'api' && args[1] === 'snapshot') {
+  process.stdout.write(JSON.stringify({ result: { snapshot } }));
+} else if (args[0] === 'workspace' && args[1] === 'create') {
+  const workspace = { workspace_id: 'w1', label: option('--label') };
+  snapshot.workspaces.push(workspace);
+  const tab = addTab('w1', '1');
+  save();
+  process.stdout.write(JSON.stringify({ result: { workspace, tab } }));
+} else if (args[0] === 'tab' && args[1] === 'create') {
+  addTab(option('--workspace'), option('--label'));
+  save();
+  process.stdout.write('{}');
+} else if (args[0] === 'tab' && args[1] === 'rename') {
+  snapshot.tabs.find(({ tab_id }) => tab_id === args[2]).label = args[3];
+  save();
+  process.stdout.write('{}');
+} else {
+  process.stderr.write('unsupported: ' + args.join(' '));
+  process.exit(2);
+}
+`);
+  const executable = path.join(directory, 'herdr');
+  await writeFile(executable, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(scriptPath)} "$@"\n`);
+  await chmod(executable, 0o755);
+  return {
+    executable,
+    statePath,
+    async tabCount() {
+      return JSON.parse(await readFile(statePath, 'utf8')).tabs.length;
+    },
+    async creations() {
+      return (await readFile(logPath, 'utf8')).split('\n').filter(Boolean);
+    },
+  };
+}
+
+// The cloud routes write to a node:http response; these tests only need it not to throw.
+function collectResponse() {
+  return { writeHead() {}, end() {}, setHeader() {} };
+}
+
+async function checkAwsLoginFailStop() {
+  const { createShellTransport } = await importTransport();
   const authError = Object.assign(new Error('AWS login required'), { code: 'AWS_LOGIN_REQUIRED' });
   let prepareAttempts = 0;
   const transport = createShellTransport({

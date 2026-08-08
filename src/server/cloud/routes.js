@@ -19,6 +19,9 @@ export function createCloudRoutes({ minter }) {
         send(response, 200, await minter.prepare({
           sessionId: url.searchParams.get('sessionId'),
           op: url.searchParams.get('op') ?? 'state',
+          // How many faces the browser wants. Absent means the default six, so a
+          // client that never learned about the setting is unaffected.
+          faces: url.searchParams.get('faces'),
         }), origin);
       } catch (error) {
         sendFailure(response, error, origin, 502);

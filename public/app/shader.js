@@ -1,3 +1,5 @@
+import { FACETS } from './facets.js';
+
 const vertexSource = `
   attribute vec2 a_position;
   void main() {
@@ -125,7 +127,9 @@ export function startShader(canvas) {
 
   return {
     setFocus(face) {
-      focus = face == null ? 0 : (face + 1) / 6;
+      // Normalised by the faces there actually are: u_focus is a 0..1 uniform, and a
+      // fixed six sent 1.67 for the tenth face of a ten-face prism.
+      focus = face == null ? 0 : (face + 1) / FACETS.length;
       requestRender();
     },
     setOrbit(rotation) {

@@ -41,9 +41,12 @@ async function askGateway(face) {
 }
 
 async function main() {
+  // Ten is the measured AgentCore ceiling (spike/RESULTS.md T-10), and the cube's face
+  // count is a setting between six and ten — so this bound is the ceiling, not the
+  // default. It must match cube-face's.
   const face = Number(process.argv[2]);
-  if (!Number.isInteger(face) || face < 1 || face > 6) {
-    stop(64, process.stderr, 'usage: cube-wait-face <1..6>\r\n');
+  if (!Number.isInteger(face) || face < 1 || face > 10) {
+    stop(64, process.stderr, 'usage: cube-wait-face <1..10>\r\n');
     return;
   }
 

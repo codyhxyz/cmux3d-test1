@@ -76,6 +76,10 @@
           <strong>Workspace</strong>
           <button type="button" popovertarget="settings-panel" popovertargetaction="hide" aria-label="Close settings">Done</button>
         </header>
+        <label class="setting setting--range" for="face-count">
+          <span>Faces <output id="face-count-value" for="face-count">6</output></span>
+          <input id="face-count" type="range" min="6" max="10" step="1" value="6" aria-label="Number of faces" />
+        </label>
         <label class="setting setting--range" for="face-opacity">
           <span>Face opacity <output id="face-opacity-value" for="face-opacity">100%</output></span>
           <input id="face-opacity" type="range" min="0.2" max="1" step="0.05" value="1" />
@@ -138,32 +142,10 @@
            "Waking" and "Ready" without the elapsed counter talking over typing. -->
       <p class="sr-only" id="workspace-live" role="status" aria-live="polite"></p>
       <p class="sr-only" id="cube-instructions">Drag to rotate, pinch or use the mouse wheel to zoom, and select a face to focus it. Tap away from the cube, or press Escape, to release it.</p>
-      <section class="rig" id="rig" aria-describedby="cube-instructions">
-        <article class="panel panel--front" data-face="0">
-          <header></header>
-          <div class="terminal-surface" id="terminal-0"></div>
-        </article>
-        <article class="panel panel--back" data-face="1">
-          <header></header>
-          <div class="terminal-surface" id="terminal-1"></div>
-        </article>
-        <article class="panel panel--right" data-face="2">
-          <header></header>
-          <div class="terminal-surface" id="terminal-2"></div>
-        </article>
-        <article class="panel panel--left" data-face="3">
-          <header></header>
-          <div class="terminal-surface" id="terminal-3"></div>
-        </article>
-        <article class="panel panel--top" data-face="4">
-          <header></header>
-          <div class="terminal-surface" id="terminal-4"></div>
-        </article>
-        <article class="panel panel--bottom" data-face="5">
-          <header></header>
-          <div class="terminal-surface" id="terminal-5"></div>
-        </article>
-      </section>
+      <!-- The panels are built by main.js: how many there are is a setting, so the
+           prism cannot be spelled out here. Six is what a user who never touches it
+           gets, and terminal-N ids are what TerminalFleet.start() looks for. -->
+      <section class="rig" id="rig" aria-describedby="cube-instructions"></section>
     </main>
 
     <nav class="key-row" id="key-row" aria-label="Terminal keys" hidden>

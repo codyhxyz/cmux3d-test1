@@ -6,10 +6,14 @@ set -eu
 
 cd / 2>/dev/null || true
 
+# Ten, not six: the cube's face count is a setting now, and ten is the measured
+# AgentCore ceiling (spike/RESULTS.md T-10 — ten concurrent shells per runtime
+# SESSION). A face past this list exits 64 before it ever reaches herdr, which the
+# browser sees as one panel that simply never opens.
 FACE="${1:-}"
 case "$FACE" in
-  1|2|3|4|5|6) ;;
-  *) echo 'usage: cube-face <1..6>' >&2; exit 64 ;;
+  1|2|3|4|5|6|7|8|9|10) ;;
+  *) echo 'usage: cube-face <1..10>' >&2; exit 64 ;;
 esac
 
 # A stale pane context would be replayed by the agent-status hook and corrupt the

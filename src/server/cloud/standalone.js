@@ -141,7 +141,7 @@ export async function main(argv = [], env = process.env) {
       return;
     }
     if (await routes(request, response, url, origin)) return;
-    send(response, 404, { error: 'try GET / for the Cube, GET /prepare, GET /mint?shellId=face-1, or GET /session' }, origin);
+    send(response, 404, { error: 'try GET / for the Cube, GET /prepare[?faces=N], GET /mint?shellId=face-1, or GET /session' }, origin);
   });
 
   await new Promise((resolve, reject) => {
@@ -157,8 +157,8 @@ export async function main(argv = [], env = process.env) {
       + `  session : ${minter.sessionId}${minter.pinSession ? ' (pinned)' : ' (default; callers may name their own)'}\n`
       + `  aws     : ${minter.profile ? `profile ${minter.profile}` : 'default credential chain'}\n`
       + `  origins : ${[...allowedOrigins].join(' ')}${allowFileOrigin ? ' null (--allow-file-origin)' : ''}\n`
-      + `  prepare : GET /prepare?sessionId=… — one /invocations call; without it /mnt/workspace never mounts\n`
-      + `  faces   : ${minter.faces.join(' ')}\n`
+      + `  prepare : GET /prepare?sessionId=…[&faces=N] — one /invocations call; without it /mnt/workspace never mounts\n`
+      + `  faces   : ${minter.faces.join(' ')} (default ${minter.faceLimits.default}, max ${minter.faceLimits.max} — AgentCore allows ${minter.faceLimits.max} shells per session)\n`
       + `  expiry  : ${minter.expiresIn}s — the browser must re-mint before every reconnect\n`,
   );
   return { server, minter, port };

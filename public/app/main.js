@@ -11,7 +11,7 @@ import {
   removeHost,
   setActiveHost,
 } from './connection.js';
-import { FACETS } from './facets.js';
+import { capClipPath, capPadding, capSize, clampFaces, DEFAULT_FACES, FACETS, MAX_FACES, MIN_FACES, setFaceCount } from './facets.js';
 import { herdrMetadata } from './herdr.js';
 import { createHandTracking } from './hand-tracking.js';
 import { trackKeyboardInset } from './keyboard-inset.js';
@@ -26,6 +26,8 @@ import { createWorkspaceLifecycle, describeActivity, sleepPolicy } from './works
 const rig = document.getElementById('rig');
 const viewport = document.getElementById('viewport');
 const portList = document.getElementById('port-list');
+const faceCountInput = document.getElementById('face-count');
+const faceCountValue = document.getElementById('face-count-value');
 const opacityInput = document.getElementById('face-opacity');
 const opacityValue = document.getElementById('face-opacity-value');
 const momentumInput = document.getElementById('momentum-duration');
@@ -70,6 +72,11 @@ const HANDOFF_WINDOW_MS = 12_000;
 // minting a fresh one would silently strand the previous machine's files. Declared above
 // the fleet because building its transport reads it during module evaluation.
 const AGENTCORE_SESSION_KEY = 'coding-cube.agentcore.session';
+// How many faces the prism has. Read before the first transport is built because
+// /prepare carries it, and applied to FACETS before anything renders or attaches.
+const FACE_COUNT_KEY = 'coding-cube.faces';
+let faceCount = storedFaceCount();
+setFaceCount(faceCount);
 let connectionState = 'connecting';
 let connectAttempt = 0;
 // Set while a cloud transport exists: one /prepare call that re-reads state, phase and
@@ -146,10 +153,14 @@ function transportForHost(host = activeHost()) {
   const prepare = async () => {
     lifecycle.update({ preparing: true, error: null });
     try {
-      const report = await ask(`/prepare?sessionId=${encodeURIComponent(sessionId)}`);
+      // faces=N is the whole contract: the gateway ensures that many Herdr tabs exist
+      // and answers with faces[] of that length. It never removes a tab, so shrinking
+      // the prism leaves the hidden ones running with whatever is mid-task in them.
+      const report = await ask(`/prepare?sessionId=${encodeURIComponent(sessionId)}&faces=${faceCount}`);
       // `busy` is the container's own report of which panes hold a working agent. A
       // minter that does not forward it leaves that unproven rather than assumed.
       lifecycle.update({ preparing: false, everStarted: true, workspace: report, busy: report?.busy ?? null });
+      adoptServedFaceCount(report);
       return report;
     } catch (error) {
       lifecycle.update({ preparing: false, error: { message: error.message, auth: error.code === 'AWS_LOGIN_REQUIRED' } });
@@ -164,6 +175,10 @@ function transportForHost(host = activeHost()) {
   return createShellTransport({
     name: host.name,
     sessionId,
+    // Only the fallback for transport.faces before the first /prepare answers; the
+    // gateway's faces[] supersedes it, so a later change of the setting cannot strand
+    // a stale count here.
+    faces: faceCount,
     mintUrl: async (shellId) => (await ask(`/mint?shellId=${encodeURIComponent(shellId)}&sessionId=${encodeURIComponent(sessionId)}`)).url,
     // Also returns the face -> terminal_id map, from the same call that materialises
     // /mnt/workspace. The transport refuses to open a shell until it resolves.
@@ -257,8 +272,16 @@ space.bind();
 connectHost();
 momentumInput.value = String(momentumSliderValue(space.settleSeconds));
 gravityInput.checked = space.zeroGravity;
+// The bounds are the measured shell ceiling, not two numbers typed into the markup.
+faceCountInput.min = String(MIN_FACES);
+faceCountInput.max = String(MAX_FACES);
+faceCountInput.value = String(faceCount);
 
 opacityInput.addEventListener('input', updateOpacity);
+faceCountInput.addEventListener('input', () => updateFaceCountValue(clampFaces(faceCountInput.value)));
+// Rebuilt on change, not input: dragging six to ten would otherwise tear the whole
+// fleet down and back up four times on the way, once per step the thumb passes over.
+faceCountInput.addEventListener('change', () => applyFaceCount(faceCountInput.value));
 momentumInput.addEventListener('input', updateMomentum);
 gravityInput.addEventListener('change', () => space.setZeroGravity(gravityInput.checked));
 handSensitivity.addEventListener('input', updateHandSensitivity);
@@ -361,6 +384,7 @@ document.getElementById('install-copy').addEventListener('click', async (event) 
   setTimeout(() => { button.textContent = 'Copy'; }, 1600);
 });
 updateOpacity();
+updateFaceCountValue(faceCount);
 updateMomentumValue(space.settleSeconds);
 updateHandSensitivity();
 
@@ -705,20 +729,43 @@ function lastSeen(host) {
   return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
 }
 
+// The prism's shape is data: styles.css owns the transforms and each panel carries
+// only its own angle, so the same rules draw a square prism and a ten-face drum.
 function renderFaces() {
-  for (const facet of FACETS) {
-    const panel = rig.querySelector(`.panel[data-face="${facet.face}"]`);
-    if (!panel) continue;
+  const count = FACETS.length;
+  rig.style.setProperty('--sides', String(FACETS.filter((facet) => !facet.cap).length));
+  // Null at six faces, and an unset property is what styles.css falls back on — so the
+  // square prism's caps keep the cube's exact square panel rather than a clip that
+  // happens to trace it.
+  setOrClear(rig, '--cap-size', capSize(count));
+  setOrClear(rig, '--cap-padding', capPadding(count));
+  rig.replaceChildren(...FACETS.map((facet) => {
+    const panel = document.createElement('article');
+    panel.className = `panel panel--${facet.cap ? 'cap' : 'side'}`;
+    panel.dataset.face = String(facet.face);
+    panel.style.setProperty('--panel-angle', `${facet.angle}deg`);
+    // Per panel, not per rig: the two caps look at the drum from opposite sides, so at
+    // an odd side count their polygons are mirror images rather than the same shape.
+    if (facet.cap) setOrClear(panel, '--cap-clip', capClipPath(count, facet.angle));
     panel.setAttribute('aria-label', `${facet.name} terminal`);
-    panel.querySelector('header').innerHTML = `
+
+    const header = document.createElement('header');
+    header.innerHTML = `
       <span><i></i><strong>${facet.name}</strong><small data-session-label>${facet.code}</small></span>
       <b data-agent-status></b>
     `;
-  }
+    const surface = document.createElement('div');
+    surface.className = 'terminal-surface';
+    // TerminalFleet.start() finds its host element by this id and no other way.
+    surface.id = `terminal-${facet.face}`;
+
+    panel.append(header, surface);
+    return panel;
+  }));
 }
 
 function renderPorts() {
-  for (const facet of FACETS) {
+  portList.replaceChildren(...FACETS.map((facet) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'port-button';
@@ -731,8 +778,92 @@ function renderPorts() {
       if (space.focused === facet.face) space.release();
       else space.focus(facet.face);
     });
-    portList.append(button);
+    return button;
+  }));
+}
+
+function storedFaceCount() {
+  try {
+    const saved = localStorage.getItem(FACE_COUNT_KEY);
+    return saved === null ? DEFAULT_FACES : clampFaces(saved);
+  } catch {
+    // Private browsing; the default prism is still the right one to draw.
+    return DEFAULT_FACES;
   }
+}
+
+function rememberFaceCount(count) {
+  try {
+    localStorage.setItem(FACE_COUNT_KEY, String(count));
+  } catch {
+    // Worst case the choice lasts until reload.
+  }
+}
+
+// The gateway clamps out-of-range counts and answers with faces[] of the length it
+// actually served, so that length — not what we asked for — is how many panes exist.
+// Following it keeps a stale or hand-edited setting from leaving panels with nothing
+// behind them. Deferred because this runs inside the ensureWorkspace the transport is
+// still awaiting, and rebuilding the fleet underneath it would strand that open.
+function adoptServedFaceCount(report) {
+  const served = Array.isArray(report?.faces) ? report.faces.length : 0;
+  if (!served || served === faceCount) return;
+  setTimeout(() => applyFaceCount(served, { persist: false }), 0);
+}
+
+function applyFaceCount(value, { persist = true } = {}) {
+  const count = clampFaces(value);
+  faceCountInput.value = String(count);
+  updateFaceCountValue(count);
+  if (persist) rememberFaceCount(count);
+  if (count === faceCount && FACETS.length === count) return;
+
+  faceCount = count;
+  setFaceCount(count);
+  space.release();
+  renderFaces();
+  renderPorts();
+  rebuildTerminals();
+}
+
+// A face count change is the one moment the fleet's membership changes. TerminalFleet
+// builds its terminals once, from FACETS, inside start(), and exposes no way to add or
+// drop a single face — so the fleet is retired and rebuilt against the fresh panels.
+// That is lossless where it matters: the Herdr pane behind each face keeps running
+// whatever the browser does, and reattaching replays its screen.
+// ponytail: terminals.js should own this as fleet.sync(), so main.js need not reach
+// past the one-shot guard in start(). See the report accompanying this change.
+function rebuildTerminals() {
+  const wasAttached = fleet.attached;
+  // detach() is the safe way to drop the sockets: it clears entry.ws before closing,
+  // which is what makes the close handler treat each one as superseded rather than
+  // scheduling a reconnect into a terminal that is about to be thrown away.
+  fleet.detach();
+  for (const entry of fleet.entries.values()) {
+    entry.shell?.dispose();
+    entry.term.dispose();
+  }
+  fleet.entries.clear();
+  // The old host elements are gone from the DOM; start() re-observes the new ones.
+  fleet.resizeObserver.disconnect();
+  fleet.openCount = 0;
+  fleet.focusedFace = null;
+  fleet.started = false;
+  fleet.start();
+  fleet.setWindowActive(isPageActive());
+  if (wasAttached) fleet.attach();
+  lifecycle.update({ faces: 0 });
+}
+
+function setOrClear(element, property, value) {
+  if (value === null) element.style.removeProperty(property);
+  else element.style.setProperty(property, value);
+}
+
+function updateFaceCountValue(count) {
+  faceCountValue.value = String(count);
+  faceCountValue.textContent = faceCountValue.value;
+  faceCountInput.setAttribute('aria-valuetext', `${count} faces`);
 }
 
 async function refreshCameras() {

@@ -1,5 +1,5 @@
 import { isPageActive, onPageActivity } from './activity.js';
-import { FACETS } from './facets.js';
+import { drumScale, FACETS } from './facets.js';
 
 export const SETTLE_SECONDS = 10;
 export const MAX_SETTLE_SECONDS = 300;
@@ -10,6 +10,10 @@ export const MAX_DRAG_ANGULAR_SPEED = 540;
 export const DRAG_STOP_SPEED = 2;
 export const DRAG_DAMPING = Math.log(MAX_DRAG_ANGULAR_SPEED / DRAG_STOP_SPEED) / SETTLE_SECONDS;
 const DRAG_SENSITIVITY = 0.28;
+// The zoom a focused face is read at. Divided by the drum fit so the panel fills the
+// same amount of the viewport at ten faces as at six; at six the fit is 1 and this is
+// the 1.08 the cube has always focused at.
+const FOCUS_ZOOM = 1.08;
 const DRAG_SAMPLE_TIMEOUT_MS = 80;
 const MIN_ZOOM = 0.72;
 const MAX_ZOOM = 1.42;
@@ -129,7 +133,7 @@ export class SpaceController {
     this.inertia = false;
     this.#pause();
     this.rotation = { ...facet.view };
-    this.zoom = 1.08;
+    this.zoom = FOCUS_ZOOM / drumScale(FACETS.length);
     this.#markPanels();
     this.#apply(true);
     this.onFocus(face);

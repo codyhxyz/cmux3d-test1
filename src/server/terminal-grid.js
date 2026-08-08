@@ -1,17 +1,21 @@
 import os from 'node:os';
 import pty from 'node-pty';
-import { DEFAULT_WORKSPACE, ensureCubeWorkspace, readHerdrState } from './herdr-state.js';
+import { clampFaceCount, DEFAULT_FACE_COUNT, DEFAULT_WORKSPACE, ensureCubeWorkspace, MAX_FACE_COUNT, readHerdrState } from './herdr-state.js';
 import { chooseShell, repairDarwinPtyHelper, resolveExecutable } from './shell.js';
 
 const FACE_MIN = 0;
-const FACE_MAX = 5;
+// 0-based, so the last addressable face is the tenth — the AgentCore ceiling, not a
+// number of our own choosing. See MAX_FACE_COUNT.
+const FACE_MAX = MAX_FACE_COUNT - 1;
 const SLOT_MIN = 0;
+// Faces x slots is the addressable grid; the two bounds are independent and nothing
+// here has ever assumed one from the other.
 const SLOT_MAX = 3;
 const RESIZE_MAGIC = Buffer.from('CUBE');
 const HISTORY_LIMIT = 1_000_000;
 
 export class TerminalGrid {
-  constructor({ cwd, shell, herdr, workspace = DEFAULT_WORKSPACE } = {}) {
+  constructor({ cwd, shell, herdr, workspace = DEFAULT_WORKSPACE, faceCount = DEFAULT_FACE_COUNT } = {}) {
     repairDarwinPtyHelper();
     this.cwd = cwd || os.homedir();
     this.shell = chooseShell(shell);
@@ -20,15 +24,40 @@ export class TerminalGrid {
     this.targets = [];
     this.preparedAt = 0;
     this.workspaceReady = false;
+    this.faceCount = clampFaceCount(faceCount).faces;
     if (herdr && !this.herdr) throw new Error(`executable not found: ${herdr}`);
     this.sessions = new Map();
   }
 
-  async prepare() {
-    if (!this.herdr || Date.now() - this.preparedAt < 1000) return;
-    const state = this.workspaceReady
+  // The count only ever grows. A browser that widens its cube asks for a face this
+  // workspace has never had a tab for, and that request is the whole protocol on the
+  // local path — there is no second endpoint to call. Narrowing it again is the
+  // browser rendering fewer faces; the tabs stay, because one of them may hold an
+  // agent mid-task.
+  async prepare(faceCount = this.faceCount) {
+    // The current count is the fallback, so a nonsense argument can only leave the
+    // workspace as wide as it already is — never narrow it. Raised before queueing, so
+    // the runs below can only ever see the width grow.
+    const wanted = clampFaceCount(Math.max(faceCount, this.faceCount), this.faceCount).faces;
+    const grew = wanted > this.faceCount;
+    this.faceCount = wanted;
+    if (!this.herdr) return;
+    // Widening the cube reconnects every face at once, so ten of these arrive together
+    // asking for ten different widths. Overlapping them lets a plain snapshot read land
+    // between a widening and its result and publish the SHORTER target list, which
+    // leaves faces 7..10 with "no terminal on this host". One at a time, in the order
+    // they asked, so the last word always belongs to the widest request.
+    this.preparing = (this.preparing ?? Promise.resolve())
+      .then(() => this.#prepareOnce(wanted, grew), () => this.#prepareOnce(wanted, grew));
+    return this.preparing;
+  }
+
+  async #prepareOnce(wanted, grew) {
+    // A face with no terminal id yet is the one case the throttle must not swallow.
+    if (!grew && Date.now() - this.preparedAt < 1000) return;
+    const state = this.workspaceReady && !grew
       ? await readHerdrState(this.herdr, this.workspace)
-      : await ensureCubeWorkspace(this.herdr, this.workspace, this.cwd);
+      : await ensureCubeWorkspace(this.herdr, this.workspace, this.cwd, wanted);
     this.workspaceReady = true;
     this.setTargets(state.map(({ terminalId }) => terminalId));
   }
@@ -45,7 +74,7 @@ export class TerminalGrid {
   async attach(faceValue, slotValue, ws) {
     const face = normalizeInteger(faceValue, FACE_MIN, FACE_MAX);
     const slot = normalizeInteger(slotValue, SLOT_MIN, SLOT_MAX);
-    await this.prepare();
+    await this.prepare(face + 1);
     const session = this.#getSession(face, slot);
     if (session.history) send(ws, session.history);
     session.clients.add(ws);
@@ -109,6 +138,11 @@ export class TerminalGrid {
     const existing = this.sessions.get(id);
     if (existing) return existing;
 
+    // Named rather than spawned with an undefined argument: without this a face whose
+    // tab could not be created reaches node-pty as `herdr terminal attach undefined`,
+    // and the browser is told the shell exited instead of what actually happened.
+    if (this.herdr && !this.targets[face]) throw new Error(`face ${face + 1} has no terminal on this host`);
+
     const env = {
       ...process.env,
       TERM: 'xterm-256color',
@@ -129,7 +163,7 @@ export class TerminalGrid {
     // refresh reliably kills the face it reloads.
     //
     // Takeover is also the right semantics rather than a workaround: the gateway is
-    // the only thing that ever attaches to these six terminals, so a client already
+    // the only thing that ever attaches to the cube's terminals, so a client already
     // holding one is always a stale attach that has not finished dying, never a
     // second user whose session we would be stealing.
     //

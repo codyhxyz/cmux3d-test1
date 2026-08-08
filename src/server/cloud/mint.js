@@ -13,6 +13,7 @@
 // someone else's session. Binding identity to (sessionId, shellId) at mint time can.
 
 import https from 'node:https';
+import { clampFaceCount, DEFAULT_FACE_COUNT, MAX_FACE_COUNT, MIN_FACE_COUNT } from '../herdr-state.js';
 // The wire protocol, presign and SigV4 live with the harness that first proved them
 // byte-correct against the live service. Sharing that file is what keeps the product
 // and `spike/harness/agentcore.mjs` signing identical requests.
@@ -86,7 +87,7 @@ export function createMinter(options = {}) {
   const qualifier = options.qualifier ?? 'DEFAULT';
   const signer = options.signer ?? 'aws-sdk';
   const expiresIn = Math.min(Number(options.expiresIn) || MAX_EXPIRES_SECONDS, MAX_EXPIRES_SECONDS);
-  // One session id per minter run: all six faces must land in the same microVM, and
+  // One session id per minter run: every face must land in the same microVM, and
   // the browser has no business choosing it. It may still name its own unless pinned,
   // because the id IS the workspace and the browser is the thing that remembers it.
   const sessionId = options.sessionId ? validateSessionId(options.sessionId) : newSessionId('cube-');
@@ -158,7 +159,10 @@ export function createMinter(options = {}) {
     expiresIn,
     pinSession,
     profile,
-    faces: [0, 1, 2, 3, 4, 5].map(faceShellId),
+    // Every shell id this minter will sign, which is the ten AgentCore allows per
+    // session — not the six a cube shows by default.
+    faces: Array.from({ length: MAX_FACE_COUNT }, (_, face) => faceShellId(face)),
+    faceLimits: { min: MIN_FACE_COUNT, max: MAX_FACE_COUNT, default: DEFAULT_FACE_COUNT },
 
     session() {
       return {
@@ -171,25 +175,40 @@ export function createMinter(options = {}) {
       };
     },
 
-    async prepare({ sessionId: requested, op = 'state' } = {}) {
+    // `faces` is how many faces the browser wants. Out of range is clamped here and
+    // reported in the response — never a rejection, because refusing the call is
+    // refusing the mount, and the user would get no terminals at all over a number
+    // they can fix with a slider.
+    async prepare({ sessionId: requested, op = 'state', faces } = {}) {
       const target = targetSession(requested);
+      const request = clampFaceCount(faces);
       const startedAt = Date.now();
-      const result = await invokeRuntime(target, { op });
+      const result = await invokeRuntime(target, { op, faces: request.faces });
       const json = safeJson(result.body);
       if (result.statusCode >= 400) {
         log(`prepare ${target} FAILED HTTP ${result.statusCode}`);
         throw new CloudError(json?.message ?? result.body.slice(0, 400), { status: 502 });
       }
       const state = json?.state ?? 'unknown';
-      log(`prepare ${target} op=${op} state=${state} in ${Date.now() - startedAt}ms`);
+      // The face -> terminal_id map the transport needs anyway, from the same call
+      // that creates the mount. One call, both obligations.
+      const servedFaces = Array.isArray(json?.faces) ? json.faces : [];
+      log(`prepare ${target} op=${op} faces=${request.faces} served=${servedFaces.length} state=${state} in ${Date.now() - startedAt}ms`);
       return {
         sessionId: target,
         state,
         phase: json?.phase ?? null,
         elapsedMs: json?.elapsedMs ?? null,
-        // The face -> terminal_id map the transport needs anyway, from the same call
-        // that creates the mount. One call, both obligations.
-        faces: Array.isArray(json?.faces) ? json.faces : [],
+        faces: servedFaces,
+        // What the container actually served, never what we asked it for. A container
+        // image that predates the setting ignores `faces`, answers six and reports no
+        // faceCount at all — echoing the request back would claim ten faces over an
+        // array of six, and every consumer would be reading a number no pane exists
+        // for. faces[] is the ground truth, so it is what this counts.
+        faceCount: servedFaces.length || (Number.isFinite(json?.faceCount) ? json.faceCount : request.faces),
+        facesRequested: request.requested,
+        facesClamped: request.clamped || json?.facesClamped === true,
+        faceLimits: json?.faceLimits ?? { min: MIN_FACE_COUNT, max: MAX_FACE_COUNT, default: DEFAULT_FACE_COUNT },
         // The container's own account of which panes hold a working agent. The browser
         // joins it to faces[].paneId to say "agent working — sleep paused"; dropping it
         // here would leave that permanently unprovable rather than merely unknown.
@@ -203,6 +222,7 @@ export function createMinter(options = {}) {
       const shellId = requestedShell ?? (face === null || face === undefined ? null : faceShellId(Number(face)));
       if (!shellId) throw new CloudError('pass ?shellId=face-1 or ?face=0');
       validateShellId(shellId);
+      refuseBeyondCeiling(shellId);
       const target = targetSession(requested);
       const mintedAt = Date.now();
       // Presigning is pure local crypto: no AWS call, no cost, no latency.
@@ -227,6 +247,18 @@ export function createMinter(options = {}) {
       };
     },
   };
+}
+
+// Presigning an eleventh face costs nothing and looks like success, then fails at the
+// WebSocket handshake as one face that never opens. Say no here instead, where the
+// answer can name the measured limit.
+function refuseBeyondCeiling(shellId) {
+  const face = Number(/^face-(\d+)(?:-slot-\d+)?$/.exec(shellId)?.[1]);
+  if (Number.isFinite(face) && face > MAX_FACE_COUNT) {
+    throw new CloudError(
+      `${shellId} is past the ceiling: AgentCore allows ${MAX_FACE_COUNT} concurrent shells per runtime session`,
+    );
+  }
 }
 
 function isExpiredCredentials(result) {

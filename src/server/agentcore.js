@@ -5,7 +5,18 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { createBusyTracker } from './busy.js';
 import { paths } from './config.js';
-import { cubePaneIds, DEFAULT_WORKSPACE, ensureCubeWorkspace, readHerdrState, watchHerdrState } from './herdr-state.js';
+import {
+  clampFaceCount,
+  cubePaneIds,
+  cubePaneScope,
+  DEFAULT_FACE_COUNT,
+  DEFAULT_WORKSPACE,
+  ensureCubeWorkspace,
+  MAX_FACE_COUNT,
+  MIN_FACE_COUNT,
+  readHerdrState,
+  watchHerdrState,
+} from './herdr-state.js';
 import { createRuntime } from './runtime.js';
 import { createSessionStore, waitForMount } from './session-store.js';
 import { chooseShell } from './shell.js';
@@ -21,7 +32,6 @@ const WORKSPACE = env.CODING_CUBE_WORKSPACE || DEFAULT_WORKSPACE;
 const WORKDIR_OVERRIDE = env.CODING_CUBE_WORKDIR || null;
 const SPIKE = env.CODING_CUBE_SPIKE === '1';
 const ALLOW_EPHEMERAL = env.CODING_CUBE_ALLOW_EPHEMERAL === '1';
-const FACE_COUNT = 6;
 const HERDR_READY_TIMEOUT_MS = 30_000;
 const RETRY_MS = 5000;
 const MOUNT_WATCH_MS = Number(env.CODING_CUBE_MOUNT_WATCH_MS || 5000);
@@ -61,6 +71,12 @@ let state = 'booting';
 let phase = 'start';
 let phases = [];
 let faces = [];
+// Every cube pane that exists, hidden faces included — see loadFaces().
+let paneScope = [];
+// How many faces the browser last asked for. It survives an eviction only as far as
+// the next /prepare, which carries the count on every call, so a cold microVM boots
+// the default and widens as soon as the client says so.
+let faceCount = DEFAULT_FACE_COUNT;
 let integrations = [];
 let herdr = { executable: HERDR, version: null, socket: SOCKET, socketModes: {} };
 let bootstrapPromise = null;
@@ -150,7 +166,7 @@ async function runBootstrap() {
   await step('workdir', setWorkdir);
   await step('herdr-server', startHerdrServer);
   await step('herdr-ready', waitForHerdrServer);
-  const cube = await step('workspace', () => ensureCubeWorkspace(HERDR, WORKSPACE, workdir));
+  const cube = await step('workspace', () => ensureCubeWorkspace(HERDR, WORKSPACE, workdir, faceCount));
   await step('faces', () => loadFaces(cube));
   await step('integrations', installIntegrations);
   await step('busy', startBusyTracking);
@@ -236,11 +252,13 @@ async function reconcile() {
 
     // Compare pane ids, not terminal ids: the pane id is what the event stream
     // subscribes to, so it is the thing whose change has to invalidate the stream.
-    const before = faces.map(({ paneId }) => paneId).join(',');
+    // The whole scope, not the rendered faces — the stream watches hidden panes too,
+    // and a hidden pane that moved is an agent nothing is listening to.
+    const before = paneScope.join(',');
     // Idempotent by construction: it recreates only the faces that are missing
-    // and leaves every unrelated workspace and tab alone.
-    await loadFaces(await ensureCubeWorkspace(HERDR, WORKSPACE, workdir));
-    const repaired = faces.map(({ paneId }) => paneId).join(',') !== before;
+    // and leaves every unrelated workspace and tab alone. It never removes one.
+    await loadFaces(await ensureCubeWorkspace(HERDR, WORKSPACE, workdir, faceCount));
+    const repaired = paneScope.join(',') !== before;
     if (repaired) {
       healing.faceRepairs += 1;
       warn(`restored the cube workspace (${reasons.join(', ')})`);
@@ -483,10 +501,26 @@ function watchSockets(directory) {
 // makes a repaired face reconnect instead of talking to a dead pane.
 async function loadFaces(cube = null) {
   const state = cube ?? await readHerdrState(HERDR, WORKSPACE);
-  runtime.terminalGrid.setTargets(state.map(({ terminalId }) => terminalId));
-  faces = state.map(({ face, tabId, paneId, terminalId }) => ({ face, label: `Face ${face + 1}`, tabId, paneId, terminalId }));
-  busy.setPaneIds(faces.map(({ paneId }) => paneId));
+  // faces[] is the contract: exactly the count the browser asked for, in order.
+  const shown = state.slice(0, faceCount);
+  runtime.terminalGrid.setTargets(shown.map(({ terminalId }) => terminalId));
+  faces = shown.map(({ face, tabId, paneId, terminalId }) => ({ face, label: `Face ${face + 1}`, tabId, paneId, terminalId }));
+  // /ping is judged on every pane that EXISTS, not on the ones being rendered. A cube
+  // shrunk from ten to six leaves four panes alive, and an agent in one of them must
+  // still hold the microVM awake — otherwise shrinking the cube silently becomes a way
+  // to sleep a machine out from under a working agent.
+  paneScope = cubePaneScope(state, WORKSPACE);
+  busy.setPaneIds(paneScope);
   return faces;
+}
+
+// Growing creates the missing tabs. Shrinking creates nothing and closes nothing — see
+// ensureCubeWorkspace(); the panes stay so the work in them survives.
+async function applyFaceCount(count) {
+  if (count === faceCount) return;
+  faceCount = count;
+  if (state !== 'ready') return;
+  await loadFaces(await ensureCubeWorkspace(HERDR, WORKSPACE, workdir, faceCount));
 }
 
 async function installIntegrations() {
@@ -593,16 +627,25 @@ async function invoke(body) {
       return { op, seconds, holdUntil: busy.hold(seconds), ping: busy.status() };
     }
     if (op === 'exec') return await runExec(body?.cmd);
-    return await stateResponse(op);
+    // The face count rides on the state call because that is the call every wake makes
+    // anyway: one /invocations both materialises the mount and settles the shape.
+    return await stateResponse(op, body?.faces);
   } finally {
     busy.endInvocation();
   }
 }
 
-async function stateResponse(op) {
+async function stateResponse(op, requestedFaces) {
+  // Out of range is clamped and reported, never a failure: an old client asking for
+  // twelve gets ten faces and a flag saying so, rather than no workspace at all.
+  const request = clampFaceCount(requestedFaces, faceCount);
   let error = null;
   try {
+    // Settled before the boot when there is one to do, so a cold start creates the
+    // right number of tabs in a single pass rather than six and then four more.
+    if (state !== 'ready') faceCount = request.faces;
     await bootstrap();
+    await applyFaceCount(request.faces);
   } catch (failure) {
     error = failure.message;
   }
@@ -611,6 +654,10 @@ async function stateResponse(op) {
     state,
     phase,
     error,
+    faceCount,
+    facesRequested: request.requested,
+    facesClamped: request.clamped,
+    faceLimits: { min: MIN_FACE_COUNT, max: MAX_FACE_COUNT, default: DEFAULT_FACE_COUNT },
     elapsedMs: state === 'ready' ? bootMs : Date.now() - bootStartedAt,
     phases,
     ...store.report(),
@@ -669,17 +716,22 @@ function faceState(number) {
   // cube-wait-face polls this, and a shell-only session reaches it before anything
   // has called /invocations, so asking is what starts the machine.
   bootstrap().catch(() => {});
-  const known = Number.isInteger(number) && number >= 1 && number <= FACE_COUNT;
-  const entry = known ? faces[number - 1] : null;
+  // Bounded by the ten-shell ceiling, not by the count currently rendered: a shell for
+  // face 8 can only exist because the browser asked for eight faces, and it polls this
+  // route while the workspace is still widening. A null terminalId means "not yet",
+  // which is what cube-wait-face already waits on; an error would abort the face.
+  const known = Number.isInteger(number) && number >= 1 && number <= MAX_FACE_COUNT;
+  const entry = known ? faces[number - 1] ?? null : null;
   return {
     state,
     phase,
     face: number,
+    faceCount,
     persistence,
     elapsedMs: state === 'ready' ? bootMs : Date.now() - bootStartedAt,
     terminalId: entry?.terminalId ?? null,
     paneId: entry?.paneId ?? null,
-    error: known ? null : `face must be 1..${FACE_COUNT}`,
+    error: known ? null : `face must be 1..${MAX_FACE_COUNT}`,
   };
 }
 

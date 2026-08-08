@@ -592,11 +592,28 @@ body.is-dragging { cursor: grabbing; }
   50% { opacity: 0.35; }
 }
 
+/* A prism, not a cube: --sides side panels around the vertical axis plus two caps.
+   Four sides is the square prism the product shipped with, and every number below is
+   written so that at four sides it resolves to exactly what the cube always used. */
 .rig {
+  /* Overridden by main.js as the face count changes; four is six faces. */
+  --sides: 4;
+  /* Panels stay one --cube wide at every count, so the apothem is what pushes them
+     out. A regular polygon of side W has apothem W / (2 * tan(180deg / S)), which is
+     what makes neighbouring panels meet edge to edge instead of gapping or
+     overlapping. At four sides tan(45deg) is 1, so this is --half: today's cube. */
+  --apothem: calc(var(--cube) / (2 * tan(180deg / var(--sides))));
+  /* See drumScale() in facets.js. sin(180deg / 4) and sin(45deg) are the same value,
+     so at six faces this is exactly 1 and scale3d below is the identity matrix. */
+  --drum-fit: calc(sin(180deg / var(--sides)) / sin(45deg));
   position: relative;
   width: var(--cube);
   height: var(--cube);
-  transform: rotateX(var(--rx)) rotateY(var(--ry)) scale(var(--scale));
+  /* scale() is 2D and deliberately leaves z alone — that is the existing zoom. The
+     drum fit has to be a true 3D scale or a ten-sided prism would be squashed in x
+     and y while still sitting at its full depth. */
+  transform: rotateX(var(--rx)) rotateY(var(--ry)) scale(var(--scale))
+    scale3d(var(--drum-fit), var(--drum-fit), var(--drum-fit));
   transform-style: preserve-3d;
   transition: filter 180ms cubic-bezier(0.25, 1, 0.5, 1);
 }
@@ -685,12 +702,23 @@ body.is-dragging { cursor: grabbing; }
    is attached, so nothing is painted over the top of them. */
 .rig.is-translucent .panel { backface-visibility: visible; }
 
-.panel--front { transform: translateZ(var(--half)); }
-.panel--back { transform: rotateY(180deg) translateZ(var(--half)); }
-.panel--right { transform: rotateY(90deg) translateZ(var(--half)); }
-.panel--left { transform: rotateY(-90deg) translateZ(var(--half)); }
-.panel--top { transform: rotateX(90deg) translateZ(var(--half)); }
-.panel--bottom { transform: rotateX(-90deg) translateZ(var(--half)); }
+/* Each panel carries only its own angle; the shape of the prism lives here. At four
+   sides the sides resolve to 0deg, 90deg, 180deg and -90deg at --half — the six
+   transforms this rule replaced, value for value. */
+.panel--side { transform: rotateY(var(--panel-angle, 0deg)) translateZ(var(--apothem)); }
+/* A square panel is the right lid for a square prism and the wrong one for every wider
+   drum, where its corners hang outside the flats they land on. Past four sides main.js
+   sets all three variables below — see capSize(), capPadding() and capClipPath() in
+   facets.js — and the cap becomes the drum's own cross-section. At four sides it sets
+   none of them, so this resolves to inset 0 with no clip and the panel's own 9px
+   padding: the cube's top face, untouched down to its border radius. Prism height
+   never depends on the count, so the caps stay at --half either way. */
+.panel--cap {
+  inset: calc((var(--cube) - var(--cap-size, var(--cube))) / 2);
+  padding: calc(9px + var(--cap-padding, 0px));
+  clip-path: var(--cap-clip, none);
+  transform: rotateX(var(--panel-angle, 90deg)) translateZ(var(--half));
+}
 
 .xterm,
 .xterm-screen,
