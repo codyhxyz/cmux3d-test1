@@ -59,9 +59,12 @@ export function cloudRoute(route) {
   return async function onRequest({ request, env }) {
     try {
       if (request.method !== 'GET' && request.method !== 'HEAD') throw new CloudError(405, 'method not allowed');
+      // Authenticated before anything else, configuration included: whether this deployment
+      // holds AWS keys is not a question an unauthenticated caller gets to ask.
+      const identity = identify(request);
       const config = readConfig(env);
       const params = new URL(request.url).searchParams;
-      const sessionId = await resolveSessionId(params.get('sessionId'), identify(request), config);
+      const sessionId = await resolveSessionId(params.get('sessionId'), identity, config);
 
       if (route === 'session') return respond(200, sessionPayload(config, sessionId));
       if (route === 'prepare') {
