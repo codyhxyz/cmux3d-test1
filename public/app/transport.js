@@ -67,7 +67,10 @@ const PASSTHROUGH_FRAME_MAX = 32_768;
 const FRAME_INTERVAL_MS = 1000 / DEFAULT_FRAME_RATE;
 const COALESCE_MS = 4;
 const CONFIRM_MS = 20_000;
-const AWS_LOGIN_REQUIRED = 'AWS_LOGIN_REQUIRED';
+// Failures a retry cannot fix because a human has to act first: an expired `aws login` on the
+// loopback minter, or a hosted minter this browser has never been paired with. The fleet
+// stops reconnecting on these and offers a way out, instead of six terminals hammering a wall.
+const NEEDS_A_HUMAN = new Set(['AWS_LOGIN_REQUIRED', 'PAIRING_REQUIRED']);
 
 const { CONNECTING = 0, OPEN = 1, CLOSED = 3 } = globalThis.WebSocket || {};
 const encoder = new TextEncoder();
@@ -333,7 +336,7 @@ class ShellSocket {
     try {
       await prepare();
     } catch (error) {
-      this.#end(1006, `workspace not ready: ${error.message}`, error.code === AWS_LOGIN_REQUIRED);
+      this.#end(1006, `workspace not ready: ${error.message}`, NEEDS_A_HUMAN.has(error.code));
       return;
     }
     if (this.#ended) return;
@@ -344,7 +347,7 @@ class ShellSocket {
     } catch (error) {
       // A dead minter is transient. Expired AWS login is not: only the Retry button
       // should ask again after the operator has run `aws login`.
-      this.#end(1006, `mint failed: ${error.message}`, error.code === AWS_LOGIN_REQUIRED);
+      this.#end(1006, `mint failed: ${error.message}`, NEEDS_A_HUMAN.has(error.code));
       return;
     }
     if (this.#ended) return;
@@ -566,7 +569,7 @@ class PassthroughSocket {
     try {
       url = await mint();
     } catch (error) {
-      this.#end(1006, `mint failed: ${error.message}`, error.code === AWS_LOGIN_REQUIRED);
+      this.#end(1006, `mint failed: ${error.message}`, NEEDS_A_HUMAN.has(error.code));
       return;
     }
     if (this.#ended) return;

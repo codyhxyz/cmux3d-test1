@@ -1,3 +1,14 @@
 name = "coding-cube"
 pages_build_output_dir = "./dist"
 compatibility_date = "2026-07-19"
+
+# Plain configuration lives here rather than in the dashboard: on a direct upload wrangler
+# treats this file as authoritative for vars, so anything set only in the dashboard is
+# dropped from the deployment (secrets are managed separately and do persist). Measured the
+# hard way — CUBE_RUNTIME_ARN was on the project and invisible to the Function.
+#
+# Nothing secret goes in here. The runtime ARN is an account id and a runtime name, both
+# already in the README; the AWS keys and the pairing code are Pages secrets:
+#   CUBE_AWS_ACCESS_KEY_ID  CUBE_AWS_SECRET_ACCESS_KEY  CUBE_PAIRING_TOKEN
+[vars]
+CUBE_RUNTIME_ARN = "arn:aws:bedrock-agentcore:us-east-1:808175385344:runtime/coding_cube_nat-3RJI162JL3"

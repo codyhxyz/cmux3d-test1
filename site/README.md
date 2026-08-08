@@ -29,41 +29,55 @@ npx wrangler pages functions build --outdir=/tmp/fnbuild
 
 ## Configure
 
-### One Access application
+### The pairing code
 
-Cloudflare Access covers **the whole hostname**, not just the API paths. That is deliberate:
-an Access app in front of `/mint` answers an unauthenticated `fetch()` with a 302 to the
-identity provider, which arrives at the page as an HTML body where JSON was expected —
-indistinguishable from a broken minter. Covering the site means the browser is already
-authenticated before any script runs.
+The page is public. The three API paths are not: they require `X-Cube-Token` to match the
+`CUBE_PAIRING_TOKEN` secret. This is the same mechanism the loopback gateway has always used
+— one secret, held by the operator's browser in `localStorage`, paired once and kept.
 
-The cost is that the cube is no longer a public page. It is a terminal on a machine you own,
-so that is the right trade, but it is a trade.
+Pair a browser by opening the site once with the code in the fragment:
 
-- Application type: Self-hosted
-- Domain: `codingcube.codyh.xyz`, path empty (the whole host)
-- Policy: Allow → Emails → your address
+```
+https://codingcube.codyh.xyz/#token=<CUBE_PAIRING_TOKEN>
+```
 
-Access then injects `Cf-Access-Authenticated-User-Email` on every request that reaches a
-Function. `lib/cloud.js` reads it and **refuses to sign anything if it is absent**, so a
-deployment whose Access application was deleted or misconfigured fails closed rather than
-handing root shells to the internet.
+`connection.js` adopts it onto the active host and strips it from the URL. There is no login
+page, nothing expires, and Cloudflare Zero Trust is not involved.
 
-### Three secrets and one variable
+It is a bearer token and nothing more: whoever holds it gets shells. That is the accepted
+blast radius for one operator, and it is the reason the page can stay public while this does
+not. **Multi-user replaces this with a verified identity keyed to a per-user runtime** — see
+[`../MULTI_USER.md`](../MULTI_USER.md). It does not layer on top of it.
+
+A header, not a query parameter: all three routes are `fetch()` calls, and a token in a query
+string lands in Cloudflare's request logs, browser history, and any `Referer` that escapes.
+
+### Three secrets
 
 ```bash
 npx wrangler pages secret put CUBE_AWS_ACCESS_KEY_ID     --project-name coding-cube
 npx wrangler pages secret put CUBE_AWS_SECRET_ACCESS_KEY --project-name coding-cube
+npx wrangler pages secret put CUBE_PAIRING_TOKEN         --project-name coding-cube
 ```
 
-`CUBE_RUNTIME_ARN` is not a secret; set it as a plain environment variable on the Pages
-project. Optional: `CUBE_REGION` (defaults to the region in the ARN), `CUBE_QUALIFIER`,
-`CUBE_MINT_EXPIRES`, and `CUBE_SESSION_POLICY=pinned` to stop a browser with cleared storage
-booting a second microVM onto the same EFS workspace.
-
-The key is the one from `spike/aws/create-minter-user.sh` — a user that can invoke one
+The AWS key is the one from `spike/aws/create-minter-user.sh` — a user that can invoke one
 runtime and open shells on it, and can create and delete nothing. That matters, because it
 now sits in Cloudflare's secret store rather than your `~/.aws/credentials`.
+
+### Plain variables go in `wrangler.toml`, not the dashboard
+
+`CUBE_RUNTIME_ARN` lives in `[vars]`. On a direct upload wrangler treats `wrangler.toml` as
+authoritative for vars, so anything set only in the dashboard is silently dropped from the
+deployment — measured, after the ARN sat on the project and stayed invisible to the Function.
+Secrets are managed separately and do persist.
+
+Optional: `CUBE_REGION` (defaults to the region in the ARN), `CUBE_QUALIFIER`,
+`CUBE_MINT_EXPIRES`.
+
+`CUBE_SESSION_POLICY=pinned` is **not** safe to turn on yet. It would stop a browser with
+cleared storage booting a second microVM onto the same EFS workspace, but the server then
+409s any client-named session and `main.js` does not adopt the id from the response body.
+Teach the client to adopt it first.
 
 ## Why there is no signer in this directory
 

@@ -36,8 +36,12 @@ The six faces can run on an AWS Bedrock AgentCore runtime instead of this machin
 files on EFS at `/mnt/workspace`, compute billed only while it is awake, and the whole
 cube asleep when it is idle.
 
-Nothing to run. Open <https://codingcube.codyh.xyz>, sign in at the Cloudflare Access
-prompt, and pick **Cloud** in Computers.
+Nothing to run. Open <https://codingcube.codyh.xyz> and pick **Cloud** in Computers.
+
+The page is public; the cloud is not. Pair a browser once with
+`https://codingcube.codyh.xyz/#token=<pairing code>` and it stays paired — the same pairing
+code the local gateway uses, kept in `localStorage`, with nothing to sign in to and nothing
+that expires.
 
 The minting API is served from that origin as Cloudflare Pages Functions
 (`site/functions/`), so the page and the thing that signs its shells are the same origin.

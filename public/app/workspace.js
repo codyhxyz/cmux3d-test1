@@ -72,6 +72,14 @@ export function deriveWorkspaceState({
   if (!cloud) return blank();
 
   if (error) {
+    // Pairing is the one failure the person reading this can fix from here, and it is the
+    // first thing a new browser sees, so it gets its own words rather than "Needs attention".
+    if (error.pairing === true) {
+      return state('attention', {
+        detail: 'This browser has not been paired with your cloud. Add the pairing code in Computers.',
+        action: 'Retry',
+      });
+    }
     const auth = error.auth === true || /aws login/i.test(error.message || '');
     return state('attention', {
       detail: auth

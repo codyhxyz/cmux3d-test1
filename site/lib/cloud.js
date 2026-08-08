@@ -38,6 +38,12 @@ import {
 // transport.js. A revoked key in Cloudflare and an expired `aws login` are the same state to
 // the interface, so they are the same code.
 const CREDENTIAL_ACTION_REQUIRED = 'AWS_LOGIN_REQUIRED';
+// The browser already treats this as "stop retrying, ask the human" — it is what the local
+// gateway answers with when a device has not been paired.
+const PAIRING_REQUIRED = 'PAIRING_REQUIRED';
+// There is one operator, so the derived session id is a constant rather than a function of
+// the secret: rotating the pairing code must not move you to a different microVM.
+const OPERATOR = 'operator';
 const REFRESH_MARGIN_SECONDS = 30;
 const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
 const INVOKE_ATTEMPTS = 4;
@@ -60,11 +66,11 @@ export function cloudRoute(route) {
     try {
       if (request.method !== 'GET' && request.method !== 'HEAD') throw new CloudError(405, 'method not allowed');
       // Authenticated before anything else, configuration included: whether this deployment
-      // holds AWS keys is not a question an unauthenticated caller gets to ask.
-      const identity = identify(request);
+      // holds AWS keys is not a question an unpaired caller gets to ask.
+      authorize(request, env);
       const config = readConfig(env);
       const params = new URL(request.url).searchParams;
-      const sessionId = await resolveSessionId(params.get('sessionId'), identity, config);
+      const sessionId = await resolveSessionId(params.get('sessionId'), config);
 
       if (route === 'session') return respond(200, sessionPayload(config, sessionId));
       if (route === 'prepare') {
@@ -114,20 +120,42 @@ function readConfig(env) {
   };
 }
 
-// Cloudflare Access injects this on every request it lets through, after verifying its own
-// JWT. A request that reaches a Function without it means the Access application is not
-// actually covering this hostname — which is a deployment that would otherwise sign root
-// shells for the internet, so it is refused rather than defaulted.
-function identify(request) {
-  const email = request.headers.get('cf-access-authenticated-user-email');
-  if (!email) {
-    throw new CloudError(403, 'this request did not come through Cloudflare Access; the cube refuses to sign shells without it');
+// The pairing code, which is the same mechanism the loopback gateway has always used — one
+// secret, held by the operator's browser, paired once and kept in localStorage. It is a
+// bearer token and nothing more: whoever holds it gets shells. That is the accepted blast
+// radius for a single operator, and it is why the page can stay public while this does not.
+//
+// This is the single-operator gate. Multi-user replaces it with a verified identity keyed to
+// a per-user runtime (MULTI_USER.md); it does not layer on top of it.
+//
+// Sent as a header rather than a query parameter on purpose: all three routes are fetch()
+// calls, so a header costs nothing, and a token in a query string lands in Cloudflare's
+// request logs, the browser's history and any Referer that leaks out.
+function authorize(request, env) {
+  const expected = env.CUBE_PAIRING_TOKEN;
+  // Fails closed. An unset secret must never mean "no gate".
+  if (!expected) throw new CloudError(503, 'this deployment is missing CUBE_PAIRING_TOKEN', { code: CREDENTIAL_ACTION_REQUIRED });
+  const presented = request.headers.get('x-cube-token') ?? '';
+  if (!constantTimeEqual(presented, expected)) {
+    throw new CloudError(401, 'this cube needs its pairing code', { code: PAIRING_REQUIRED });
   }
-  return email.toLowerCase();
 }
 
-async function resolveSessionId(requested, identity, config) {
-  const pinned = await deriveSessionId(identity);
+// Comparing with === leaks the length of the matching prefix through timing. The token is
+// long and random enough that this is close to paranoia, but it costs four lines.
+function constantTimeEqual(a, b) {
+  const encoder = new TextEncoder();
+  const left = encoder.encode(a);
+  const right = encoder.encode(b);
+  let diff = left.length ^ right.length;
+  for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
+    diff |= (left[i] ?? 0) ^ (right[i] ?? 0);
+  }
+  return diff === 0;
+}
+
+async function resolveSessionId(requested, config) {
+  const pinned = await deriveSessionId(OPERATOR);
   if (config.pinSession) {
     if (requested && requested !== pinned) {
       throw new CloudError(409, 'this workspace is pinned to one session; use the id returned by /session', { extra: { sessionId: pinned } });

@@ -142,7 +142,13 @@ function transportForHost(host = activeHost()) {
   const sessionId = agentcoreSessionId();
   const ask = async (path) => {
     const base = await resolveCloudBase(fallbackBase);
-    const response = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(20_000) });
+    // Read fresh on every call rather than captured when the transport was built, so pairing
+    // takes effect on the next mint instead of after a reload.
+    const code = activeHost().token;
+    const response = await fetch(`${base}${path}`, {
+      signal: AbortSignal.timeout(20_000),
+      headers: code ? { 'x-cube-token': code } : undefined,
+    });
     const body = await response.json().catch(() => null);
     if (!response.ok) {
       const error = new Error(body?.error || `minter answered ${response.status}`);
@@ -166,7 +172,14 @@ function transportForHost(host = activeHost()) {
       lifecycle.update({ preparing: false, everStarted: true, workspace: report, busy: report?.busy ?? null });
       return report;
     } catch (error) {
-      lifecycle.update({ preparing: false, error: { message: error.message, auth: error.code === 'AWS_LOGIN_REQUIRED' } });
+      lifecycle.update({
+        preparing: false,
+        error: {
+          message: error.message,
+          auth: error.code === 'AWS_LOGIN_REQUIRED',
+          pairing: error.code === 'PAIRING_REQUIRED',
+        },
+      });
       throw error;
     }
   };
