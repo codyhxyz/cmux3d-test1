@@ -72,13 +72,14 @@ export function deriveWorkspaceState({
   if (!cloud) return blank();
 
   if (error) {
-    // Pairing is the one failure the person reading this can fix from here, and it is the
-    // first thing a new browser sees, so it gets its own words rather than "Needs attention".
+    // Pairing is the one failure the person reading this can fix from here, so it gets its
+    // own words rather than "Needs attention". No longer the first thing a new browser
+    // sees — an unpaired one stays in the demo and never calls the cloud — so this is now
+    // a code that was entered and rejected, and the caller's sentence about it beats a
+    // general one. The guidance is kept either way: it is the part that is actionable.
     if (error.pairing === true) {
-      return state('attention', {
-        detail: 'This browser has not been paired with your cloud. Add the pairing code in Computers.',
-        action: 'Retry',
-      });
+      const cause = error.message || 'This browser is not paired with your cloud.';
+      return state('attention', { detail: `${cause} Add the pairing code in Computers.`, action: 'Retry' });
     }
     const auth = error.auth === true || /aws login/i.test(error.message || '');
     return state('attention', {
