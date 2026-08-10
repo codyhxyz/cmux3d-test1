@@ -38,6 +38,38 @@ cube asleep when it is idle.
 
 Nothing to run. Open <https://codingcube.codyh.xyz> and pick **Cloud** in Computers.
 
+### From this terminal, with no cube at all
+
+```bash
+npm run shell
+```
+
+That is a shell on the cloud workspace, in the terminal you typed it into. No browser, no
+gateway, no pairing code: this process holds the AWS credentials, so it signs its own
+shell URL and connects straight to AgentCore — the one thing a browser cannot do, and the
+whole reason the website needs a minter.
+
+Name the runtime once and it is remembered in `~/.coding-cube/runtime`:
+
+```bash
+npm run shell -- --runtime-arn arn:aws:bedrock-agentcore:us-east-1:808175385344:runtime/coding_cube_nat-3RJI162JL3
+CUBE_AWS_PROFILE=coding-cube npm run shell        # the non-expiring profile, as elsewhere
+npm run shell -- --face 5                         # face 1 by default; 1..10
+```
+
+`--face N` is not a second kind of terminal. It attaches to the same herdr terminal the
+cube's face N shows, so work started here is already on the cube when the cube is next
+opened — and a face open in a browser cannot also be open here, because AgentCore gives
+one shell id to one client (close 4000). Pick a face the browser is not using.
+
+`ctrl-]` detaches. The shell keeps running in the cloud; so does anything running in it.
+
+Files live on `/mnt/workspace/work`, which is **one filesystem for the whole runtime** —
+a different session id lands in the same files, so there is no way to strand work by
+arriving with the wrong id. It survives sleep and restarts. It does not survive an agent
+runtime version update; that is the redeploy caveat in `spike/README.md`, and it is the
+only thing here that can lose work.
+
 The page is public; the cloud is not. Pair a browser once with
 `https://codingcube.codyh.xyz/#token=<pairing code>` and it stays paired — the same pairing
 code the local gateway uses, kept in `localStorage`, with nothing to sign in to and nothing
