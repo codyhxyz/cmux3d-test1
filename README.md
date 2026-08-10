@@ -38,23 +38,33 @@ cube asleep when it is idle.
 
 Nothing to run. Open <https://codingcube.codyh.xyz> and pick **Cloud** in Computers.
 
-### From this terminal, with no cube at all
+### The cloud connection on its own
 
 ```bash
-npm run shell
+cloud
 ```
 
-That is a shell on the cloud workspace, in the terminal you typed it into. No browser, no
-gateway, no pairing code: this process holds the AWS credentials, so it signs its own
-shell URL and connects straight to AgentCore — the one thing a browser cannot do, and the
-whole reason the website needs a minter.
+A shell on the cloud workspace, in the terminal you typed it into, from any directory.
+The cube does not come into it: the rotating six-shell GUI is a separate module that
+happens to reach the same machine, and this needs none of it — no browser, no gateway, no
+pairing code. This process holds the AWS credentials, so it signs its own shell URL and
+connects straight to AgentCore, which is the one thing a browser cannot do and the whole
+reason the website needs a minter.
 
-Name the runtime once and it is remembered in `~/.coding-cube/runtime`:
+`npm run shell` is the same thing from a checkout. The `cloud` command is one line in
+`~/.local/bin`:
+
+```sh
+#!/bin/sh
+exec node /path/to/coding-cube/src/cli/cloud-shell.js "$@"
+```
+
+Name the runtime and the profile once; both are remembered under `~/.coding-cube`, and
+every run after is the bare word:
 
 ```bash
-npm run shell -- --runtime-arn arn:aws:bedrock-agentcore:us-east-1:808175385344:runtime/coding_cube_nat-3RJI162JL3
-CUBE_AWS_PROFILE=coding-cube npm run shell        # the non-expiring profile, as elsewhere
-npm run shell -- --face 5                         # face 1 by default; 1..10
+CUBE_AWS_PROFILE=coding-cube cloud --runtime-arn arn:aws:bedrock-agentcore:us-east-1:808175385344:runtime/coding_cube_nat-3RJI162JL3
+cloud --face 5                                    # face 1 by default; 1..10
 ```
 
 `--face N` is not a second kind of terminal. It attaches to the same herdr terminal the

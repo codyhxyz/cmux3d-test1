@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// A shell on the cloud cube, in this terminal. No browser, no gateway, no pairing code.
+// The cloud connection on its own: a shell on the AgentCore workspace, in this terminal.
+// No browser, no gateway, no pairing code, and no cube — the rotating six-shell GUI is a
+// separate module that happens to reach the same machine, and nothing here depends on it.
 //
 // The website needs a minter because a browser cannot hold AWS credentials and an https
-// page cannot fetch 127.0.0.1. Neither constraint applies here: this process has the
-// credentials, so it signs its own shell URL and connects straight to AgentCore. That
-// makes this the shortest path to the cloud workspace that exists, and the one to use
-// while the hosted page is still being sorted out.
+// page cannot fetch 127.0.0.1. Neither constraint applies to a terminal: this process has
+// the credentials, so it signs its own shell URL and connects straight to AgentCore.
 //
-// It is the same workspace either way. Files live on /mnt/workspace under a runtime
-// session id, and the id — not the client — is what picks the machine.
+// Files live on /mnt/workspace, one filesystem for the whole runtime. Both clients land
+// in the same files; only the way in differs.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,33 +34,33 @@ async function operatorSessionId() {
   return `cube-${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }
 
-function runtimeFile() {
-  return path.join(stateDir(), 'runtime');
+// Named once, remembered after. Nothing else about this command has to be typed, and a
+// command you have to look up is one you do not run.
+function stateFile(name) {
+  return path.join(stateDir(), name);
 }
 
-// Named once, remembered after. Everything else about this command is derivable, so the
-// ARN is the only thing that would otherwise have to be retyped or pasted from a README.
-function rememberedRuntimeArn() {
+function remembered(name) {
   try {
-    return fs.readFileSync(runtimeFile(), 'utf8').trim() || null;
+    return fs.readFileSync(stateFile(name), 'utf8').trim() || null;
   } catch {
     return null;
   }
 }
 
-function rememberRuntimeArn(arn) {
+function remember(name, value) {
   const dir = stateDir();
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(runtimeFile(), `${arn}\n`, { mode: 0o600 });
+  fs.writeFileSync(stateFile(name), `${value}\n`, { mode: 0o600 });
 }
 
 function usage() {
   return [
-    'usage: npm run shell -- [--face N] [--runtime-arn ARN] [--session ID]',
+    'usage: cloud [--face N] [--runtime-arn ARN] [--session ID]',
     '',
     'No runtime ARN. Name it once and it is remembered in ~/.coding-cube/runtime:',
     '',
-    '  npm run shell -- --runtime-arn arn:aws:bedrock-agentcore:us-east-1:ACCOUNT:runtime/NAME-ID',
+    '  cloud --runtime-arn arn:aws:bedrock-agentcore:us-east-1:ACCOUNT:runtime/NAME-ID',
     '',
     'spike/aws/create-runtime.sh builds one and prints its ARN.',
   ].join('\n');
@@ -108,14 +108,17 @@ async function main(argv) {
     return 64;
   }
 
-  // The env override has to land before the SDK's provider chain is built, since it reads
-  // AWS_PROFILE once at construction.
-  const profile = process.env.CUBE_AWS_PROFILE || process.env.AWS_PROFILE;
+  // Remembered too, and for the same reason as the ARN: the profile exists to stop the
+  // daily `aws login` expiry, so needing to retype it every time defeats the point of
+  // having one. The assignment has to land before the SDK builds its provider chain,
+  // which reads AWS_PROFILE once at construction.
+  const named = process.env.CUBE_AWS_PROFILE || process.env.AWS_PROFILE;
+  const profile = named || remembered('profile');
   if (profile) process.env.AWS_PROFILE = profile;
 
-  const remembered = rememberedRuntimeArn();
+  const knownArn = remembered('runtime');
   const cloud = readCloudOptions(
-    { ...process.env, CUBE_RUNTIME_ARN: process.env.CUBE_RUNTIME_ARN || remembered || '' },
+    { ...process.env, CUBE_RUNTIME_ARN: process.env.CUBE_RUNTIME_ARN || knownArn || '' },
     argv,
     { force: true },
   );
@@ -128,7 +131,7 @@ async function main(argv) {
   const shellId = faceShellId(face - 1);
   const region = cloud.region;
 
-  note(`cube    : ${cloud.runtimeArn.split('/').pop()} (${region})`);
+  note(`runtime : ${cloud.runtimeArn.split('/').pop()} (${region})`);
   note(`session : ${sessionId}`);
   note(`shell   : ${shellId}${profile ? ` · profile ${profile}` : ''}`);
   note('waking  : …');
@@ -143,9 +146,12 @@ async function main(argv) {
   // so the risk is never "wrong session", it is a mount that did not come up at all.
   if (!durable) note('          NOT DURABLE — the workspace mount is missing; files will vanish at idle');
 
-  if (cloud.runtimeArn !== remembered) {
-    rememberRuntimeArn(cloud.runtimeArn);
-    note(`saved   : ${runtimeFile()} — plain \`npm run shell\` from now on`);
+  // Only after the runtime answered. Remembering an ARN that never worked would make the
+  // next run fail with no flag left to blame.
+  if (cloud.runtimeArn !== knownArn || (named && named !== remembered('profile'))) {
+    remember('runtime', cloud.runtimeArn);
+    if (profile) remember('profile', profile);
+    note(`saved   : ${stateDir()} — plain \`cloud\` from now on`);
   }
 
   const stdin = process.stdin;
