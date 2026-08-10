@@ -41,7 +41,7 @@ Nothing to run. Open <https://codingcube.codyh.xyz> and pick **Cloud** in Comput
 ### The cloud connection on its own
 
 ```bash
-cloud
+coding-cloud
 ```
 
 A shell on the cloud workspace, in the terminal you typed it into, from any directory.
@@ -51,7 +51,7 @@ pairing code. This process holds the AWS credentials, so it signs its own shell 
 connects straight to AgentCore, which is the one thing a browser cannot do and the whole
 reason the website needs a minter.
 
-`npm run shell` is the same thing from a checkout. The `cloud` command is one line in
+`npm run shell` is the same thing from a checkout. The `coding-cloud` command is one line in
 `~/.local/bin`:
 
 ```sh
@@ -63,8 +63,8 @@ Name the runtime and the profile once; both are remembered under `~/.coding-cube
 every run after is the bare word:
 
 ```bash
-CUBE_AWS_PROFILE=coding-cube cloud --runtime-arn arn:aws:bedrock-agentcore:us-east-1:808175385344:runtime/coding_cube_nat-3RJI162JL3
-cloud --face 5                                    # face 1 by default; 1..10
+CUBE_AWS_PROFILE=coding-cube coding-cloud --runtime-arn arn:aws:bedrock-agentcore:us-east-1:808175385344:runtime/coding_cube_nat-3RJI162JL3
+coding-cloud --face 5                                    # face 1 by default; 1..10
 ```
 
 `--face N` is not a second kind of terminal. It attaches to the same herdr terminal the

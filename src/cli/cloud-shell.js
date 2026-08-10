@@ -56,11 +56,11 @@ function remember(name, value) {
 
 function usage() {
   return [
-    'usage: cloud [--face N] [--runtime-arn ARN] [--session ID]',
+    'usage: coding-cloud [--face N] [--runtime-arn ARN] [--session ID]',
     '',
     'No runtime ARN. Name it once and it is remembered in ~/.coding-cube/runtime:',
     '',
-    '  cloud --runtime-arn arn:aws:bedrock-agentcore:us-east-1:ACCOUNT:runtime/NAME-ID',
+    '  coding-cloud --runtime-arn arn:aws:bedrock-agentcore:us-east-1:ACCOUNT:runtime/NAME-ID',
     '',
     'spike/aws/create-runtime.sh builds one and prints its ARN.',
   ].join('\n');
@@ -151,7 +151,7 @@ async function main(argv) {
   if (cloud.runtimeArn !== knownArn || (named && named !== remembered('profile'))) {
     remember('runtime', cloud.runtimeArn);
     if (profile) remember('profile', profile);
-    note(`saved   : ${stateDir()} — plain \`cloud\` from now on`);
+    note(`saved   : ${stateDir()} — plain \`coding-cloud\` from now on`);
   }
 
   const stdin = process.stdin;
