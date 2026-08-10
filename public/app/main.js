@@ -1,5 +1,5 @@
 import { isPageActive, onPageActivity } from './activity.js';
-import { DEFAULT_WEB_ORIGIN, pairingUrl, parseFragment } from './connection-config.js';
+import { DEFAULT_AGENTCORE_ORIGIN, DEFAULT_WEB_ORIGIN, pairingUrl, parseFragment } from './connection-config.js';
 import {
   activeHost,
   connectionPlan,

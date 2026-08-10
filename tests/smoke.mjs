@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -179,6 +179,47 @@ assert.match(
   /fallback !== DEFAULT_AGENTCORE_ORIGIN/,
   'an explicitly configured cloud origin must win over the same-origin probe',
 );
+// …and the constant it names has to actually be in scope. The assertion above passed for a
+// week while DEFAULT_AGENTCORE_ORIGIN was used but never imported: the string was there,
+// the binding was not, so every cloud connect died on a ReferenceError and painted
+// "Cloud unavailable: DEFAULT_AGENTCORE_ORIGIN is not defined" over the cube. A browser
+// module cannot be imported here to catch that, so read the bindings instead.
+for (const name of (await readdir('public/app')).filter((file) => file.endsWith('.js'))) {
+  const source = stripLiterals(await readFile(`public/app/${name}`, 'utf8'));
+  const bound = new Set(['JSON']);
+  for (const clause of source.matchAll(/import\s+(?:([\w$]+)\s*,\s*)?(?:\{([^}]*)\})?[^;]*?from/g)) {
+    if (clause[1]) bound.add(clause[1]);
+    for (const specifier of (clause[2] || '').split(',')) {
+      const local = specifier.trim().split(/\s+as\s+/).pop()?.trim();
+      if (local) bound.add(local);
+    }
+  }
+  for (const declared of source.matchAll(/(?:export\s+)?(?:const|let|var|function|class)\s+([\w$]+)/g)) bound.add(declared[1]);
+  // `export { X as Y } from …` never binds Y locally, but naming it is not a reference either.
+  for (const clause of source.matchAll(/export\s*\{([^}]*)\}\s*from/g)) {
+    for (const specifier of clause[1].split(',')) {
+      for (const part of specifier.split(/\s+as\s+/)) bound.add(part.trim());
+    }
+  }
+  // Not after a dot: HTMLMediaElement.HAVE_CURRENT_DATA is the platform's constant, not ours.
+  for (const [used] of source.matchAll(/(?<![.\w$])[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g)) {
+    assert.ok(bound.has(used), `public/app/${name} uses ${used} without importing or declaring it`);
+  }
+}
+
+// Comments and string literals are full of SCREAMING_SNAKE that is prose or a wire value —
+// 'AWS_LOGIN_REQUIRED' is a code the server sends, not an identifier this file needs.
+//
+// One pass, one alternation, deliberately: stripping quotes in separate passes lets an
+// apostrophe inside a double-quoted string ("Couldn't read the clipboard") open a phantom
+// string, and from there every pairing is off by one — the code is eaten and the literals
+// survive, which is precisely backwards. Left to right, whichever delimiter opens first wins.
+function stripLiterals(source) {
+  return source.replace(
+    /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`/g,
+    ' ',
+  );
+}
 // Pinning the session server-side is only safe if the client adopts the id the 409 carries;
 // without this every call 409s forever and cloud mode is simply broken.
 assert.match(
