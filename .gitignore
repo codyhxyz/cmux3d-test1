@@ -8,3 +8,13 @@ coverage/
 
 # Local machine state: which AgentCore workspace this checkout is pointed at.
 .cube-session
+
+# wrangler's local scratch for `pages dev` and deploys. Empty today, so it has never
+# shown up in git status — it would the first time anyone ran the site locally.
+.wrangler/
+
+# One timestamped file per harness run (spike/harness/agentcore.mjs --out defaults to
+# this directory), so tracking them means the repo grows with every measurement. The
+# findings live in spike/RESULTS.md and agentcore-harness-final.json is kept as the run
+# behind them; the intermediates stay on disk and out of git.
+spike/results/agentcore-*Z.json

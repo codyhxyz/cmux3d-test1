@@ -14,6 +14,19 @@
 
 import https from 'node:https';
 import { clampFaceCount, DEFAULT_FACE_COUNT, MAX_FACE_COUNT, MIN_FACE_COUNT } from '../herdr-state.js';
+// The reply shapes, shared with the Pages Functions that serve the same three routes on
+// the public site. Divergence there would only ever be visible to a stranger.
+import {
+  clampExpiry,
+  INVOKE_ATTEMPTS,
+  mintReply,
+  prepareReply,
+  retryableStatus,
+  retryDelayMs,
+  safeJson,
+  SESSION_HEADER,
+  sessionReply,
+} from '../../minter-contract.js';
 // The wire protocol, presign and SigV4 live with the harness that first proved them
 // byte-correct against the live service. Sharing that file is what keeps the product
 // and `spike/harness/agentcore.mjs` signing identical requests.
@@ -29,11 +42,7 @@ import {
 } from '../../../spike/harness/shell-client.mjs';
 
 export const AWS_LOGIN_REQUIRED = 'AWS_LOGIN_REQUIRED';
-export const MAX_EXPIRES_SECONDS = 300;
-const REFRESH_MARGIN_SECONDS = 30;
-const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
 const INVOKE_TIMEOUT_MS = 120_000;
-const INVOKE_ATTEMPTS = 4;
 
 export class CloudError extends Error {
   constructor(message, { status = 400, code, cause } = {}) {
@@ -86,7 +95,7 @@ export function createMinter(options = {}) {
   const region = options.region ?? runtimeArn.split(':')[3] ?? 'us-east-1';
   const qualifier = options.qualifier ?? 'DEFAULT';
   const signer = options.signer ?? 'aws-sdk';
-  const expiresIn = Math.min(Number(options.expiresIn) || MAX_EXPIRES_SECONDS, MAX_EXPIRES_SECONDS);
+  const expiresIn = clampExpiry(options.expiresIn);
   // One session id per minter run: every face must land in the same microVM, and
   // the browser has no business choosing it. It may still name its own unless pinned,
   // because the id IS the workspace and the browser is the thing that remembers it.
@@ -143,11 +152,8 @@ export function createMinter(options = {}) {
         await currentCredentials({ force: true });
         continue;
       }
-      // RetryableConflictException is documented as brief and expected while the
-      // service provisions or tears down a session, so a first 409 is not an answer.
-      const retryable = result.statusCode === 409 || result.statusCode === 429 || result.statusCode >= 500;
-      if (!retryable || attempt + 1 >= INVOKE_ATTEMPTS) return result;
-      await new Promise((resolve) => setTimeout(resolve, Math.min(500 * 2 ** attempt, 8000)));
+      if (!retryableStatus(result.statusCode) || attempt + 1 >= INVOKE_ATTEMPTS) return result;
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs(attempt)));
     }
   }
 
@@ -165,14 +171,7 @@ export function createMinter(options = {}) {
     faceLimits: { min: MIN_FACE_COUNT, max: MAX_FACE_COUNT, default: DEFAULT_FACE_COUNT },
 
     session() {
-      return {
-        sessionId,
-        runtimeArn,
-        region,
-        qualifier,
-        expiresIn,
-        refreshAfterSeconds: expiresIn - REFRESH_MARGIN_SECONDS,
-      };
+      return sessionReply({ sessionId, runtimeArn, region, qualifier, expiresIn });
     },
 
     // `faces` is how many faces the browser wants. Out of range is clamped here and
@@ -189,33 +188,11 @@ export function createMinter(options = {}) {
         log(`prepare ${target} FAILED HTTP ${result.statusCode}`);
         throw new CloudError(json?.message ?? result.body.slice(0, 400), { status: 502 });
       }
-      const state = json?.state ?? 'unknown';
       // The face -> terminal_id map the transport needs anyway, from the same call
       // that creates the mount. One call, both obligations.
-      const servedFaces = Array.isArray(json?.faces) ? json.faces : [];
-      log(`prepare ${target} op=${op} faces=${request.faces} served=${servedFaces.length} state=${state} in ${Date.now() - startedAt}ms`);
-      return {
-        sessionId: target,
-        state,
-        phase: json?.phase ?? null,
-        elapsedMs: json?.elapsedMs ?? null,
-        faces: servedFaces,
-        // What the container actually served, never what we asked it for. A container
-        // image that predates the setting ignores `faces`, answers six and reports no
-        // faceCount at all — echoing the request back would claim ten faces over an
-        // array of six, and every consumer would be reading a number no pane exists
-        // for. faces[] is the ground truth, so it is what this counts.
-        faceCount: servedFaces.length || (Number.isFinite(json?.faceCount) ? json.faceCount : request.faces),
-        facesRequested: request.requested,
-        facesClamped: request.clamped || json?.facesClamped === true,
-        faceLimits: json?.faceLimits ?? { min: MIN_FACE_COUNT, max: MAX_FACE_COUNT, default: DEFAULT_FACE_COUNT },
-        // The container's own account of which panes hold a working agent. The browser
-        // joins it to faces[].paneId to say "agent working — sleep paused"; dropping it
-        // here would leave that permanently unprovable rather than merely unknown.
-        busy: json?.busy ?? null,
-        persistence: json?.persistence ?? null,
-        invokedInMs: Date.now() - startedAt,
-      };
+      const reply = prepareReply({ sessionId: target, json, request, elapsedMs: Date.now() - startedAt });
+      log(`prepare ${target} op=${op} faces=${request.faces} served=${reply.faces.length} state=${reply.state} in ${reply.invokedInMs}ms`);
+      return reply;
     },
 
     async mint({ shellId: requestedShell, face, sessionId: requested } = {}) {
@@ -237,14 +214,7 @@ export function createMinter(options = {}) {
         signer,
       });
       log(`mint ${shellId} session=${target} expires=${expiresIn}s`);
-      return {
-        url,
-        shellId,
-        sessionId: target,
-        expiresIn,
-        expiresAt: mintedAt + expiresIn * 1000,
-        refreshAfterSeconds: expiresIn - REFRESH_MARGIN_SECONDS,
-      };
+      return mintReply({ url, shellId, sessionId: target, expiresIn, mintedAt });
     },
   };
 }
@@ -280,12 +250,4 @@ function postJson(url, headers, body) {
     request.on('error', reject);
     request.end(body);
   });
-}
-
-function safeJson(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
 }

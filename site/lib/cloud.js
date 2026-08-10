@@ -24,11 +24,23 @@
 // from spike/aws/create-minter-user.sh — it can invoke one runtime and open shells on it,
 // and can create and delete nothing.
 
-import { clampFaceCount, DEFAULT_FACE_COUNT, MAX_FACE_COUNT, MIN_FACE_COUNT } from '../../public/app/face-count.js';
+import { clampFaceCount, MAX_FACE_COUNT } from '../../public/app/face-count.js';
+// The reply shapes, shared with the loopback minter that serves the same three routes from
+// a checkout (src/server/cloud/mint.js). Also a leaf: no signer, no node.
+import {
+  clampExpiry,
+  INVOKE_ATTEMPTS,
+  mintReply,
+  prepareReply,
+  retryableStatus,
+  retryDelayMs,
+  safeJson,
+  SESSION_HEADER,
+  sessionReply,
+} from '../../src/minter-contract.js';
 import {
   buildInvocationsUrl,
   faceShellId,
-  MAX_PRESIGN_EXPIRY_SECONDS,
   presignShellUrl,
   signRequest,
   validateSessionId,
@@ -44,9 +56,6 @@ const PAIRING_REQUIRED = 'PAIRING_REQUIRED';
 // There is one operator, so the derived session id is a constant rather than a function of
 // the secret: rotating the pairing code must not move you to a different microVM.
 const OPERATOR = 'operator';
-const REFRESH_MARGIN_SECONDS = 30;
-const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
-const INVOKE_ATTEMPTS = 4;
 
 class CloudError extends Error {
   constructor(status, message, { code, extra } = {}) {
@@ -109,7 +118,7 @@ function readConfig(env) {
     // pointed somewhere else.
     region: env.CUBE_REGION || runtimeArn.split(':')[3] || 'us-east-1',
     qualifier: env.CUBE_QUALIFIER || 'DEFAULT',
-    expiresIn: Math.min(Number(env.CUBE_MINT_EXPIRES) || MAX_PRESIGN_EXPIRY_SECONDS, MAX_PRESIGN_EXPIRY_SECONDS),
+    expiresIn: clampExpiry(env.CUBE_MINT_EXPIRES),
     // free   — the browser keeps naming its own session id, exactly as it does against the
     //          loopback minter. That id IS the workspace the browser remembers, and the
     //          runtime it lands on is this operator's either way.
@@ -191,15 +200,16 @@ function shellIdFrom(params) {
   return requested;
 }
 
+// Named field by field rather than spread: `config` carries the AWS secret, and the one
+// thing this response must never do is grow a field because the config did.
 function sessionPayload(config, sessionId) {
-  return {
+  return sessionReply({
     sessionId,
     runtimeArn: config.runtimeArn,
     region: config.region,
     qualifier: config.qualifier,
     expiresIn: config.expiresIn,
-    refreshAfterSeconds: config.expiresIn - REFRESH_MARGIN_SECONDS,
-  };
+  });
 }
 
 async function mint(config, sessionId, shellId) {
@@ -217,14 +227,7 @@ async function mint(config, sessionId, shellId) {
     credentials: config.credentials,
     signer: 'raw',
   });
-  return {
-    url,
-    shellId,
-    sessionId,
-    expiresIn: config.expiresIn,
-    expiresAt: mintedAt + config.expiresIn * 1000,
-    refreshAfterSeconds: config.expiresIn - REFRESH_MARGIN_SECONDS,
-  };
+  return mintReply({ url, shellId, sessionId, expiresIn: config.expiresIn, mintedAt });
 }
 
 // Measured: /mnt/workspace does not exist for a session whose only activity is a shell
@@ -239,27 +242,7 @@ async function prepare(config, sessionId, op, faces) {
   if (result.statusCode >= 400) {
     throw new CloudError(502, json?.message ?? `runtime returned ${result.statusCode}`, { extra: { statusCode: result.statusCode } });
   }
-  const servedFaces = Array.isArray(json?.faces) ? json.faces : [];
-  return {
-    sessionId,
-    state: json?.state ?? 'unknown',
-    phase: json?.phase ?? null,
-    elapsedMs: json?.elapsedMs ?? null,
-    faces: servedFaces,
-    // What the container actually served, never what it was asked for. An image that predates
-    // the setting ignores `faces`, answers six and reports no faceCount at all; echoing the
-    // request back would claim ten faces over an array of six.
-    faceCount: servedFaces.length || (Number.isFinite(json?.faceCount) ? json.faceCount : request.faces),
-    facesRequested: request.requested,
-    facesClamped: request.clamped || json?.facesClamped === true,
-    faceLimits: json?.faceLimits ?? { min: MIN_FACE_COUNT, max: MAX_FACE_COUNT, default: DEFAULT_FACE_COUNT },
-    // The container's own account of which panes hold a working agent. The browser joins it to
-    // faces[].paneId for "agent working — sleep paused"; dropping it here would make this path
-    // quietly less honest than the loopback one it replaces.
-    busy: json?.busy ?? null,
-    persistence: json?.persistence ?? null,
-    invokedInMs: Date.now() - startedAt,
-  };
+  return prepareReply({ sessionId, json, request, elapsedMs: Date.now() - startedAt });
 }
 
 async function invokeRuntime(config, sessionId, payload) {
@@ -287,11 +270,10 @@ async function invokeRuntime(config, sessionId, payload) {
     if (response.status === 403 && /expired|InvalidSignature|security token|not authorized/i.test(text)) {
       throw new CloudError(503, 'Cloudflare is holding an AWS key that AWS is refusing. Rotate the CUBE_AWS_* secrets on the Pages project.', { code: CREDENTIAL_ACTION_REQUIRED });
     }
-    // RetryableConflictException is documented as brief and expected while the service
-    // provisions or tears down a session, so a first 409 is not an answer.
-    const retryable = response.status === 409 || response.status === 429 || response.status >= 500;
-    if (!retryable || attempt + 1 >= INVOKE_ATTEMPTS) return { statusCode: response.status, body: text };
-    await new Promise((resolve) => setTimeout(resolve, Math.min(500 * 2 ** attempt, 8000)));
+    if (!retryableStatus(response.status) || attempt + 1 >= INVOKE_ATTEMPTS) {
+      return { statusCode: response.status, body: text };
+    }
+    await new Promise((resolve) => setTimeout(resolve, retryDelayMs(attempt)));
   }
 }
 
@@ -304,12 +286,4 @@ function respond(status, body) {
       'cache-control': 'no-store',
     },
   });
-}
-
-function safeJson(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
 }

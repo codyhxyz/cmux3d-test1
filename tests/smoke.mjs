@@ -48,6 +48,7 @@ import {
   SpaceController,
   STOP_SPEED,
 } from '../public/app/space.js';
+import { mintReply, prepareReply, sessionReply } from '../src/minter-contract.js';
 import { VENDOR_ASSETS } from '../src/vendor-assets.js';
 import { readCloudOptions, readServerOptions } from '../src/server/config.js';
 import { createCloudRoutes } from '../src/server/cloud/routes.js';
@@ -79,6 +80,7 @@ await checkRenamedBrowserStore();
 await checkAwsLoginFailStop();
 await checkRuntimeProvisioningHelper();
 await checkFaceCount();
+await checkHostedMinter();
 
 assert.equal(commandKeyInput({ key: 'ArrowLeft', metaKey: true }), '\x01', 'command-left should move to the start of the shell input');
 assert.equal(commandKeyInput({ key: 'ArrowRight', metaKey: true }), '\x05', 'command-right should move to the end of the shell input');
@@ -228,12 +230,24 @@ assert.match(
   'a 409 from a pinned minter must be adopted, not just reported',
 );
 // faces[].paneId is the join key the browser uses against busy.panes; a minter that
-// drops one half leaves "Agent working — sleep paused" permanently unreachable.
-assert.match(
-  await readFile('src/server/cloud/mint.js', 'utf8'),
-  /busy: json\?\.busy/,
-  '/prepare must forward the container busy block or the Working state can never fire',
-);
+// drops one half leaves "Agent working — sleep paused" permanently unreachable. Asserted
+// through the shared builder, so it holds for the hosted minter as well as the loopback one.
+{
+  const forwarded = prepareReply({
+    sessionId: 'cube-test-12345678-1234-1234-1234-123456789012',
+    json: { state: 'ready', faces: [{ face: 0, paneId: 'pane-a' }], busy: { panes: ['pane-a'] }, persistence: { efs: true } },
+    request: clampFaceCount(6),
+    elapsedMs: 12,
+  });
+  assert.deepEqual(forwarded.busy, { panes: ['pane-a'] }, '/prepare must forward the container busy block or the Working state can never fire');
+  assert.equal(forwarded.faces[0].paneId, 'pane-a', 'the join key the browser matches busy.panes against must survive the trip');
+  assert.deepEqual(forwarded.persistence, { efs: true }, '/prepare must forward what the container says about persistence');
+  assert.equal(forwarded.invokedInMs, 12, 'the browser is told how long the mount actually took');
+  const absent = prepareReply({ sessionId: 's', json: null, request: clampFaceCount(undefined), elapsedMs: 0 });
+  assert.equal(absent.busy, null, 'a container that says nothing about busy panes is unknown, never falsely idle');
+  assert.equal(absent.state, 'unknown', 'an unparseable body is an unknown state rather than a claimed ready one');
+  assert.deepEqual(absent.faces, [], 'no faces served is an empty list, not undefined the browser has to guard');
+}
 assert.equal(normalizeHostOrigin('mymac.tailnet.ts.net'), 'https://mymac.tailnet.ts.net', 'a bare address needs TLS to be reachable from the hosted page');
 assert.equal(normalizeHostOrigin('127.0.0.1:8064'), 'http://127.0.0.1:8064', 'loopback stays plain http');
 assert.equal(normalizeHostOrigin('https://mymac.ts.net/'), 'https://mymac.ts.net', 'a pasted URL should reduce to its origin');
@@ -781,6 +795,63 @@ async function importTransport() {
 
 // Six faces is a default, not a shape. Everything below is the count being adjustable
 // 6..10 without a user who never touches the setting seeing any difference.
+// The Pages Functions are the minter every stranger's browser actually reaches, and until
+// now nothing here loaded them at all: the loopback twin was tested and the deployed one
+// was not. These are the invariants that fail closed, so they are the ones worth a check.
+async function checkHostedMinter() {
+  const { cloudRoute } = await import('../site/lib/cloud.js');
+  const call = (env, headers = {}) => cloudRoute('session')({
+    request: new Request('https://codingcube.codyh.xyz/session', { headers }),
+    env,
+  });
+  const secrets = {
+    CUBE_PAIRING_TOKEN: 'pairing-code',
+    CUBE_RUNTIME_ARN: 'arn:aws:bedrock-agentcore:us-east-1:1234:runtime/x',
+    CUBE_AWS_ACCESS_KEY_ID: 'AKIAEXAMPLE',
+    CUBE_AWS_SECRET_ACCESS_KEY: 'secret',
+  };
+
+  // A deployment with no pairing secret must never mean "no gate".
+  const ungated = await call({ ...secrets, CUBE_PAIRING_TOKEN: undefined });
+  assert.equal(ungated.status, 503, 'a deployment missing CUBE_PAIRING_TOKEN must fail closed, not open');
+
+  const unpaired = await call(secrets);
+  assert.equal(unpaired.status, 401, 'a browser that has never paired gets a 401 and nothing else');
+  const refusal = await unpaired.json();
+  assert.equal(refusal.code, 'PAIRING_REQUIRED', 'the browser stops retrying on this code rather than hammering the runtime');
+  assert.equal(refusal.minter, true, 'a refusal still identifies this origin as the minter, or the page goes looking elsewhere');
+
+  // cbd27f7: authenticate before reading configuration. Whether this deployment holds AWS
+  // keys is not a question an unpaired caller gets to ask.
+  const unpairedAndUnconfigured = await call({ CUBE_PAIRING_TOKEN: 'pairing-code' });
+  assert.equal(unpairedAndUnconfigured.status, 401, 'a missing runtime ARN must not leak out ahead of the pairing gate');
+
+  const paired = await call(secrets, { 'x-cube-token': 'pairing-code' });
+  assert.equal(paired.status, 200, 'the pairing code in a header is what opens the door');
+  const session = await paired.json();
+  assert.deepEqual(
+    Object.keys(session).sort(),
+    Object.keys(sessionReply({ sessionId: 's', runtimeArn: 'a', region: 'r', qualifier: 'q', expiresIn: 300 })).sort(),
+    'the hosted minter answers /session with the shared shape, not a dialect of it',
+  );
+  assert.equal(session.refreshAfterSeconds, session.expiresIn - 30, 'the browser is told to re-mint before the URL expires');
+  assert.equal(
+    Object.keys(mintReply({ url: 'u', shellId: 'face-1', sessionId: 's', expiresIn: 300, mintedAt: 0 })).length,
+    6,
+    'mint replies stay the six fields the transport reads',
+  );
+
+  const noSecrets = await call({ CUBE_PAIRING_TOKEN: 'pairing-code' }, { 'x-cube-token': 'pairing-code' });
+  assert.equal(noSecrets.status, 503, 'a paired caller on a deployment with no AWS keys is told to act, not retried at');
+  assert.equal((await noSecrets.json()).code, 'AWS_LOGIN_REQUIRED', 'a revoked key and an expired login are one state to the interface');
+
+  const posted = await cloudRoute('mint')({
+    request: new Request('https://codingcube.codyh.xyz/mint', { method: 'POST', headers: { 'x-cube-token': 'pairing-code' } }),
+    env: secrets,
+  });
+  assert.equal(posted.status, 405, 'the minter answers GET and HEAD only');
+}
+
 async function checkFaceCount() {
   assert.equal(DEFAULT_FACE_COUNT, 6, 'the shipped cube is six faces and stays six for anyone who never asks');
   assert.equal(MIN_FACE_COUNT, 6, 'below six the shape stops being a cube at all');
@@ -860,7 +931,18 @@ async function checkFaceCount() {
   assert.equal(asked[1].faces, null, 'a /prepare with no faces parameter must stay exactly the call it is today');
   const mintSource = await readFile('src/server/cloud/mint.js', 'utf8');
   assert.match(mintSource, /invokeRuntime\(target, \{ op, faces: request\.faces \}\)/, 'the clamped count must reach the container in the invocation body');
-  assert.match(mintSource, /facesClamped/, 'a clamp the user did not ask for must be reported in the response');
+  // Asserted on the shared reply builder rather than grepped out of one minter's source:
+  // both the loopback gateway and the hosted Pages Functions answer /prepare through this,
+  // so a clamp that stopped being reported would fail here for whichever one dropped it.
+  const clamped = prepareReply({
+    sessionId: 'cube-test-12345678-1234-1234-1234-123456789012',
+    json: { state: 'ready', faces: [] },
+    request: clampFaceCount(99),
+    elapsedMs: 0,
+  });
+  assert.equal(clamped.facesClamped, true, 'a clamp the user did not ask for must be reported in the response');
+  assert.equal(clamped.facesRequested, 99, 'the response must say what was asked for, not only what was served');
+  assert.equal(clamped.faceCount, MAX_FACE_COUNT, 'a clamped request settles at the measured ceiling');
   assert.match(
     await readFile('src/server/agentcore.js', 'utf8'),
     /stateResponse\(op, body\?\.faces\)/,
