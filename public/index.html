@@ -61,7 +61,7 @@
             <code id="install-command">curl -fsSL https://codingcube.codyh.xyz/install.sh | sh</code>
             <button type="button" id="install-copy">Copy</button>
           </div>
-          <p class="install-note" id="install-status">Appears here on its own. Keep this page open.</p>
+          <p class="install-note" id="install-status">Starts your shells and opens them, already paired.</p>
         </div>
 
         <figure class="connect-qr" id="host-qr" hidden>
@@ -119,9 +119,11 @@
     </aside>
 
     <main class="viewport" id="viewport" aria-label="Rotatable terminal cube">
+      <!-- Two audiences, one line: someone whose computer went away, and someone who has
+           never had one here. The words are set in main.js because only it knows which. -->
       <p class="status-banner" id="status-banner" aria-live="polite" hidden>
-        <span>No computer attached.</span>
-        <button type="button" popovertarget="connect-panel">Attach</button>
+        <span id="status-banner-text">No computer attached.</span>
+        <button type="button" id="status-banner-action" popovertarget="connect-panel">Attach</button>
       </p>
       <p class="status-banner status-banner--lost" id="lost-banner" aria-live="assertive" hidden>
         <strong>Connection lost.</strong>

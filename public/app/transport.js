@@ -177,7 +177,9 @@ export function createShellTransport({
         const url = await mintUrl(shellIdFor(0, 0, faceOffset), sessionId);
         return url ? { ok: true } : { ok: false, reason: 'mint returned no url' };
       } catch (error) {
-        return { ok: false, reason: error.message };
+        // The code, not just the sentence: "needs its pairing code" and "the minter is
+        // down" want different words, and only the caller knows who is reading them.
+        return { ok: false, reason: error.message, code: error.code };
       }
     },
   };
@@ -263,7 +265,7 @@ export function createPassthroughTransport({
         const url = await mintUrl(sessionId);
         return url ? { ok: true } : { ok: false, reason: 'mint returned no url' };
       } catch (error) {
-        return { ok: false, reason: error.message };
+        return { ok: false, reason: error.message, code: error.code };
       }
     },
   };

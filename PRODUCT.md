@@ -22,6 +22,7 @@ Avoid generic glass dashboards, neon cyberpunk noise, fake terminal output, deco
 
 ## Design Principles
 
+- The first-run demo outranks every operator convenience — see `CLAUDE.md`.
 - The terminals are real; visual spectacle never blocks input.
 - Spatial position should strengthen session memory.
 - Every control must remain legible and conventional.

@@ -41,6 +41,8 @@ const handSensitivity = document.getElementById('hand-sensitivity');
 const handSensitivityValue = document.getElementById('hand-sensitivity-value');
 const handCursors = new Map([...document.querySelectorAll('.hand-cursor')].map((cursor) => [cursor.dataset.hand, cursor]));
 const statusBanner = document.getElementById('status-banner');
+const statusBannerText = document.getElementById('status-banner-text');
+const statusBannerAction = document.getElementById('status-banner-action');
 const lostBanner = document.getElementById('lost-banner');
 const desktopShells = document.getElementById('desktop-shells');
 const connectStatusLabel = document.getElementById('connect-status-label');
@@ -376,7 +378,7 @@ connectForm.addEventListener('submit', (event) => {
     return;
   }
   connectTokenInput.value = '';
-  connectHost();
+  connectHost({ requested: true });
 });
 // A pasted pairing link carries both halves; split it so the user does not have to.
 connectHostInput.addEventListener('input', () => {
@@ -403,7 +405,7 @@ document.getElementById('connect-paste').addEventListener('click', async () => {
 document.getElementById('retry-now').addEventListener('click', () => {
   clearCancel();
   fleet.retryNow();
-  connectHost();
+  connectHost({ requested: true });
 });
 wakeAction.addEventListener('click', () => {
   if (lifecycle.state === 'waking') {
@@ -412,7 +414,7 @@ wakeAction.addEventListener('click', () => {
   }
   clearCancel();
   fleet.retryNow();
-  connectHost();
+  connectHost({ requested: true });
 });
 // Opening the panel or taking the command is the signal that a host may be about
 // to appear; only then is it worth watching loopback. It is also the moment the plan
@@ -443,7 +445,12 @@ updateFaceCountValue(faceCount);
 updateMomentumValue(space.settleSeconds);
 updateHandSensitivity();
 
-async function connectHost() {
+/**
+ * @param {{requested?: boolean}} [options] `requested` when a person asked for this
+ *   connection — a host row, Retry, the form. It is the difference between answering a
+ *   question and volunteering one, and on a first paint nobody has asked anything.
+ */
+async function connectHost({ requested = false } = {}) {
   // A newer attempt supersedes any probe still in flight, so tapping Connect
   // always takes effect and a slow probe never reports on the wrong computer.
   const attempt = ++connectAttempt;
@@ -454,6 +461,24 @@ async function connectHost() {
     const cloud = activeHost().kind === 'agentcore';
     // A declined wake is a decision, not a transient failure; only clearCancel() undoes it.
     if (cloud && cloudCancelled) return;
+    // On the hosted page the cloud is the Pages Functions minter, and that one fails
+    // closed by design (site/lib/cloud.js authorize()): without a pairing code every call
+    // it answers is a guaranteed 401. Asking anyway converts something this browser
+    // already knows into a red alarm about a machine a first-time visitor has never heard
+    // of. Do not ask. The six faces are already real shells running in this page, so there
+    // is nothing to fall back TO — this is the demo, and the demo is the front door.
+    //
+    // Only when hosted. A page served from a local minter reaches an ungated one on its
+    // own origin (resolveCloudBase), where no pairing code exists to be missing.
+    if (hosted && cloud && !activeHost().token) {
+      setConnectionState('demo');
+      if (requested) {
+        connectForm.hidden = false;
+        showMessage('The cloud is private. Paste its pairing code to use it.');
+        connectTokenInput.focus();
+      }
+      return;
+    }
     if (!cloud && isLoopbackHost()) desktopShells.href = hostHttp('/');
     const plan = connectionPlan();
     if (plan.type === 'mixed-content') {
@@ -484,6 +509,14 @@ async function connectHost() {
     if (probe.reason === 'unauthorized') {
       setConnectionState('unpaired');
       showMessage('That computer needs a pairing code. Copy the one printed by npm start.');
+      return;
+    }
+    // Only reachable once somebody has entered a code, because an unpaired browser never
+    // gets this far. So it is a wrong code, not a bewildering one — say which.
+    if (probe.code === 'PAIRING_REQUIRED') {
+      setConnectionState('unpaired');
+      showMessage('That pairing code did not work. Copy the one printed by npm start.');
+      lifecycle.update({ error: { message: 'That pairing code did not work.', pairing: true } });
       return;
     }
     if (!probe.ok) throw new Error(probe.reason || 'unreachable');
@@ -527,13 +560,24 @@ async function connectHost() {
 function setConnectionState(state) {
   connectionState = state;
   const host = activeHost();
-  const labels = { connecting: 'Connecting…', unpaired: 'Not connected', connected: host.name, lost: 'Reconnecting…' };
+  const labels = {
+    connecting: 'Connecting…',
+    unpaired: 'Not connected',
+    demo: 'Demo',
+    connected: host.name,
+    lost: 'Reconnecting…',
+  };
   document.body.classList.toggle('is-unpaired', state === 'unpaired');
+  document.body.classList.toggle('is-demo', state === 'demo');
   document.body.classList.toggle('is-connecting', state === 'connecting');
   document.body.classList.toggle('is-lost', state === 'lost');
   document.body.classList.toggle('is-connected', state === 'connected');
   connectStatusLabel.textContent = labels[state];
-  lifecycle.update({ cloud: host.kind === 'agentcore', connection: state });
+  // In demo there is no cloud workspace to have a lifecycle, and claiming one would put
+  // "Sleeping" on a machine that was never asked to exist. Clearing the error with it
+  // matters because a stale one would keep painting "Needs attention" over the cube.
+  if (state === 'demo') lifecycle.update({ cloud: false, error: null, preparing: false, faces: 0 });
+  else lifecycle.update({ cloud: host.kind === 'agentcore', connection: state });
   updateBanners();
   // Only Herdr has a real agent status to report. With ordinary shells there is
   // nothing to say, and saying "unknown" on every face is noise.
@@ -549,7 +593,14 @@ function showMessage(text) {
 // is showing real lifecycle progress, the generic banners stand down.
 function updateBanners() {
   const covered = !wake.hidden;
-  statusBanner.hidden = connectionState !== 'unpaired' || covered;
+  const demo = connectionState === 'demo';
+  statusBanner.hidden = (connectionState !== 'unpaired' && !demo) || covered;
+  // "No computer attached" is a fault report, and it is the wrong sentence for someone
+  // who never attached one: nothing is missing yet, and what they have is already real.
+  statusBannerText.textContent = demo
+    ? 'Demo — these six shells run right here in your browser.'
+    : 'No computer attached.';
+  statusBannerAction.textContent = demo ? 'Attach a computer' : 'Attach';
   lostBanner.hidden = connectionState !== 'lost' || covered;
 }
 
@@ -626,6 +677,9 @@ const WATCH_FOR_MS = 5 * 60_000;
 let watchingUntil = 0;
 
 function watchForHost(durationMs = WATCH_FOR_MS) {
+  // Nothing to watch from the hosted page: an https page's fetch to loopback is refused
+  // outright, and it does not need one — the installer starts the cube and opens its own
+  // tab with the pairing code already in the fragment.
   if (activeHost().kind === 'agentcore' || !isLoopbackHost()) return;
   const alreadyWatching = watchingUntil > Date.now();
   watchingUntil = Math.max(watchingUntil, Date.now() + durationMs);
@@ -731,11 +785,11 @@ function renderSavedHosts() {
     use.addEventListener('click', () => {
       clearCancel();
       if (active) {
-        connectHost();
+        connectHost({ requested: true });
         return;
       }
       switchHost(host.origin);
-      connectHost();
+      connectHost({ requested: true });
     });
     item.append(use);
 
