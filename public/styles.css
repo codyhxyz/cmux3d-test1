@@ -604,16 +604,18 @@ body.is-dragging { cursor: grabbing; }
      overlapping. At four sides tan(45deg) is 1, so this is --half: today's cube. */
   --apothem: calc(var(--cube) / (2 * tan(180deg / var(--sides))));
   /* See drumScale() in facets.js. sin(180deg / 4) and sin(45deg) are the same value,
-     so at six faces this is exactly 1 and scale3d below is the identity matrix. */
+     so at six faces the fit is exactly 1 and --zoom below is the zoom on its own. */
   --drum-fit: calc(sin(180deg / var(--sides)) / sin(45deg));
+  /* Fitting the drum and zooming it are two scales of one solid, so they multiply into
+     a single 3D scale. Either of them in 2D would leave z behind, and a solid scaled in
+     x and y but not z is a different solid: the panels facing x keep their width while
+     the ones facing z stretch, so panels that are one square stop sharing a width. It
+     is also what lets focus() divide by the fit and get the same read at every count. */
+  --zoom: calc(var(--drum-fit) * var(--scale));
   position: relative;
   width: var(--cube);
   height: var(--cube);
-  /* scale() is 2D and deliberately leaves z alone — that is the existing zoom. The
-     drum fit has to be a true 3D scale or a ten-sided prism would be squashed in x
-     and y while still sitting at its full depth. */
-  transform: rotateX(var(--rx)) rotateY(var(--ry)) scale(var(--scale))
-    scale3d(var(--drum-fit), var(--drum-fit), var(--drum-fit));
+  transform: rotateX(var(--rx)) rotateY(var(--ry)) scale3d(var(--zoom), var(--zoom), var(--zoom));
   transform-style: preserve-3d;
   transition: filter 180ms cubic-bezier(0.25, 1, 0.5, 1);
 }

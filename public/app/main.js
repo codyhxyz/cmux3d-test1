@@ -624,13 +624,20 @@ function renderLifecycle(snapshot, { stateChanged } = {}) {
   renderSavedHosts();
   // The state, never the clock: a counter ticking into a live region would interrupt
   // terminal input once a second, which is worse than saying nothing.
-  if (stateChanged && snapshot.state) {
-    workspaceLive.textContent = [snapshot.label, snapshot.detail, snapshot.note]
-      .filter(Boolean)
-      // Sentence boundaries are what a screen reader pauses on, and a detail that is
-      // already a sentence must not end up with two full stops.
-      .map((part) => (/[.!?…]$/.test(part) ? part : `${part}.`))
-      .join(' ');
+  //
+  // A state of null clears it rather than skipping the write. Building the cloud
+  // transport announces itself before connectHost() has decided anything, so a first-time
+  // visitor was told "Sleeping. Never started." and then dropped into the demo — leaving a
+  // screen reader holding a sentence about a machine that this page never asked to exist.
+  if (stateChanged) {
+    workspaceLive.textContent = snapshot.state
+      ? [snapshot.label, snapshot.detail, snapshot.note]
+        .filter(Boolean)
+        // Sentence boundaries are what a screen reader pauses on, and a detail that is
+        // already a sentence must not end up with two full stops.
+        .map((part) => (/[.!?…]$/.test(part) ? part : `${part}.`))
+        .join(' ')
+      : '';
   }
 }
 

@@ -675,7 +675,15 @@ try {
   assert.doesNotMatch(mainSource, /setInterval/, 'HerdR state should not be polled');
   assert.match(mainSource, /lifecycle\.update\(\{ faces: open \}\)/, 'how many faces are live is the difference between waking and ready');
   assert.match(mainSource, /setDetailInterest\(event\.newState === 'open'/, 'workspace details are refreshed when asked for, never in the background');
-  assert.match(mainSource, /if \(stateChanged && snapshot\.state\)/, 'only a state change reaches the live region');
+  assert.match(mainSource, /if \(stateChanged\) \{/, 'only a state change reaches the live region');
+  // The other half: a workspace with no state has to clear it. Skipping the write instead
+  // left a screen reader holding "Sleeping. Never started." on a page that had just
+  // decided it has no cloud at all.
+  assert.match(
+    mainSource,
+    /workspaceLive\.textContent = snapshot\.state[\s\S]{0,400}:\s*''/,
+    'a workspace with no state must clear the live region, not leave the last sentence in it',
+  );
   assert.match(mainSource, /if \(cloud && cloudCancelled\) return;/, 'a cancelled wake must survive a tab switch');
 
   const lifecycleModule = await fetch(`${httpBase}/app/workspace.js`);
