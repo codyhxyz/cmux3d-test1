@@ -1,106 +1,17 @@
-import { execFile } from 'node:child_process';
-import { pairingUrl } from '../../public/app/connection-config.js';
-import { attachCloud } from './cloud/gateway.js';
-import { readServerOptions } from './config.js';
-import { createRuntime } from './runtime.js';
-import { createTailnetIdentity, offerServe, tailnetAddress } from './tailscale.js';
+// One entry point, because one launcher already exists: `~/.coding-cube/bin/coding-cube`
+// execs this file with whatever arguments it was given, and install.sh has been writing that
+// launcher since the first release. Teaching this file the subcommand means `coding-cube
+// pair` works on machines that installed the cube before the command existed.
+//
+// A leading `-` is a flag for the server (`--cloud`, `--expose`), never a command, so the
+// only word that means anything here is `pair`. Anything else is a typo, and a typo must not
+// start a terminal server that was not asked for.
+const word = process.argv[2];
+const command = !word || word.startsWith('-') ? 'serve' : word;
 
-const options = readServerOptions();
-if (options.cloudRequested && !options.cloud) {
-  console.error('--cloud needs a runtime: set CUBE_RUNTIME_ARN, or pass --runtime-arn <arn>.');
-  process.exit(2);
+if (command === 'serve') await import('./serve.js');
+else if (command === 'pair') await import('../cli/pair.js');
+else {
+  console.error(`coding-cube: no command called ${command}. Try \`coding-cube\` or \`coding-cube pair\`.`);
+  process.exitCode = 2;
 }
-const useTailnet = options.expose || options.serveOnly;
-const tailnet = useTailnet && process.env.CODING_CUBE_LOCAL_ONLY !== '1' ? await tailnetAddress() : null;
-const peers = tailnet && options.trustTailnet
-  ? createTailnetIdentity({ allowedLogins: options.tailscaleUsers })
-  : null;
-
-const runtime = createRuntime({
-  ...options,
-  hosts: options.expose && tailnet ? [options.host, tailnet.ip] : [options.host],
-  tailnet: peers,
-});
-
-// Before listen(), because mounting takes over the server's 'request' listener.
-const minter = options.cloud
-  ? attachCloud(runtime.server, {
-    cloud: options.cloud,
-    webOrigin: options.webOrigin,
-    token: options.token,
-    exposure: runtime.exposure,
-    tailnet: peers,
-    log: (line) => console.log(line),
-  })
-  : null;
-
-runtime.start().then(({ host, port }) => {
-  console.log(`coding-cube is listening at http://${host}:${port}/`);
-  if (options.rotated) console.log('pairing code rotated; paired phones must pair again');
-
-  if (minter) {
-    console.log('');
-    console.log(`  cloud   : ${minter.runtimeArn}`);
-    console.log(`  aws     : ${minter.profile ? `profile ${minter.profile}` : 'default credential chain (expires with `aws login`)'}`);
-    console.log(`  session : ${minter.sessionId}${minter.pinSession ? ' (pinned)' : ' (the browser names its own)'}`);
-    console.log('  Pick Cloud (AgentCore) in Computers; six faces attach to one runtime session.');
-    console.log('');
-  }
-
-  if (options.expose && tailnet) {
-    const phoneOrigin = `http://${tailnet.dnsName}:${port}`;
-    runtime.exposure.active = true;
-    runtime.exposure.tsOrigin = phoneOrigin;
-    console.log('');
-    console.log('  On your phone, open:');
-    console.log(`  \x1b[1m${phoneOrigin}\x1b[0m${peers ? '' : `/#token=${encodeURIComponent(options.token)}`}`);
-    if (peers) console.log('  (no code needed — Tailscale already knows your devices)');
-    console.log('');
-  }
-
-  // TLS is deliberately separate from direct tailnet binding: a cloud gateway
-  // stays on loopback and lets Tailscale Serve authenticate every request.
-  if (tailnet) upgradeToTls(port);
-
-  if (process.env.CODING_CUBE_OPEN === '0') return;
-  const webUrl = pairingUrl(options.webOrigin, `http://127.0.0.1:${port}`, options.token);
-  if (process.platform === 'darwin') execFile('open', [webUrl]);
-  else console.log(`open ${webUrl}`);
-}).catch((error) => {
-  console.error(`coding-cube failed to start: ${error.message}`);
-  process.exitCode = 1;
-});
-
-// The hosted page is https, so it can only reach this machine over TLS. That is
-// what Tailscale Serve provides, and the only thing it needs is to be switched on.
-async function upgradeToTls(port) {
-  const serve = await offerServe(port).catch(() => null);
-  if (!serve) return;
-
-  if (serve.tsOrigin) {
-    runtime.exposure.active = true;
-    runtime.exposure.tsOrigin = serve.tsOrigin;
-    console.log(`tailnet TLS: ${serve.tsOrigin}`);
-    if (serve.funnel) console.log('  warning: funnel is on for this port — it is reachable from the public internet');
-    console.log(`  ${options.webOrigin} now works on your phone too:`);
-    console.log(`  ${pairingUrl(options.webOrigin, serve.tsOrigin, peers ? '' : options.token)}`);
-    return;
-  }
-  if (!serve.enableUrl) return;
-
-  console.log('');
-  console.log(`  Want ${options.webOrigin} itself to work on your phone? Turn on Tailscale Serve once:`);
-  console.log(`  ${serve.enableUrl}`);
-  console.log('  Then restart with --expose. The address above works either way.');
-}
-
-async function shutdown() {
-  try {
-    await runtime.stop();
-  } finally {
-    process.exit(0);
-  }
-}
-
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);

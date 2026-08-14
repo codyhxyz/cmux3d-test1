@@ -67,7 +67,8 @@ import {
 import { browserOriginAllowed } from '../src/server/origin.js';
 import { createRuntime } from '../src/server/runtime.js';
 import { createTailnetIdentity, parseServeIdentity, parseServeStatus, parseStatus, parseWhois } from '../src/server/tailscale.js';
-import { loadOrCreateToken, rotateToken } from '../src/server/token-store.js';
+import { loadCloudToken, loadOrCreateToken, newToken, rotateToken, saveCloudToken } from '../src/server/token-store.js';
+import { qrBlock, qrModules } from '../src/cli/terminal-qr.js';
 import {
   encodeResize as encodeHarnessResize,
   encodeStdin as encodeHarnessStdin,
@@ -155,6 +156,18 @@ assert.equal(loadOrCreateToken(tokenEnv), firstToken, 'pairing should survive a 
 assert.equal((await stat(path.join(tokenDir, 'token'))).mode & 0o777, 0o600, 'the pairing code should not be world readable');
 assert.notEqual(rotateToken(tokenEnv), firstToken, 'rotating should invalidate the old pairing code');
 assert.equal(readServerOptions({ ...tokenEnv, CODING_CUBE_TOKEN: 'from-env' }, []).token, 'from-env', 'an explicit token should win over the stored one');
+
+// The cloud's pairing code is a Cloudflare secret that cannot be read back, so unlike the
+// local token this one is never invented on demand: a machine that made one up would print a
+// QR that pairs a phone to a 401.
+assert.equal(loadCloudToken(tokenEnv), '', 'a machine that has never held the cloud code must not conjure one');
+const cloudCode = newToken();
+saveCloudToken(cloudCode, tokenEnv);
+assert.equal(loadCloudToken(tokenEnv), cloudCode, 'the cloud code should survive a restart so the QR can be reprinted');
+assert.equal((await stat(path.join(tokenDir, 'cloud-token'))).mode & 0o777, 0o600, 'the cloud pairing code should not be world readable');
+assert.equal(loadCloudToken({ ...tokenEnv, CUBE_PAIRING_TOKEN: 'from-the-environment' }), 'from-the-environment', 'an explicit cloud code should win over the stored one');
+assert.throws(() => saveCloudToken('short', tokenEnv), 'something too short to be a pairing code must not overwrite a working one');
+assert.equal(loadCloudToken(tokenEnv), cloudCode, 'a rejected write must leave the code that still works in place');
 await rm(tokenDir, { recursive: true, force: true });
 
 // The cloud is served from the hosted origin itself, as Pages Functions, so from the hosted
@@ -442,6 +455,41 @@ pairingCode.make();
 assert.equal((pairingCode.getModuleCount() - 17) % 4, 0, 'a QR symbol should have a valid version size');
 assert.ok(pairingCode.isDark(0, 0), 'the finder pattern should anchor the symbol');
 assert.ok(VENDOR_ASSETS.some(([route]) => route === '/vendor/qrcode.mjs'), 'the QR encoder must be vendored for the browser');
+
+// `coding-cube pair` paints the same symbol in a terminal, two module rows per character
+// cell. Read the escape sequences back the way a terminal would: swapped halves or a row off
+// by one still look like a QR and scan as nothing at all, which is a failure that happens on
+// the phone, where there is nothing to read.
+const pairLink = pairingUrl('https://codingcube.codyh.xyz', 'https://mymac.tail47c266.ts.net', 'K'.repeat(32));
+const painted = readTerminalQr(qrBlock(pairLink));
+const encoded = qrModules(pairLink);
+assert.deepEqual(painted.slice(0, encoded.length), encoded, 'the painted QR must carry the modules the encoder produced');
+assert.ok(painted.at(-1).every((dark) => !dark), 'the half row an odd symbol leaves over is quiet zone, so it stays light');
+assert.ok(encoded[0].every((dark) => !dark), 'a camera needs the quiet zone, so the border must survive the halving');
+
+function readTerminalQr(block) {
+  const rows = [];
+  for (const line of block.split('\n')) {
+    const top = [];
+    const bottom = [];
+    let ink = [false, false];
+    for (const piece of line.split('\x1b[')) {
+      const match = /^([0-9;]*)m(.*)$/s.exec(piece);
+      if (!match) continue;
+      const codes = match[1].split(';');
+      // `\x1b[38;2;R;G;B;48;2;R;G;Bm` — foreground paints the upper module, background the
+      // lower. Anything else on this line is the reset, which paints nothing.
+      if (codes[0] === '38') ink = [codes[2] === '0', codes[7] === '0'];
+      for (const cell of match[2]) {
+        assert.equal(cell, '▀', 'the only glyph in a painted QR is the upper half block');
+        top.push(ink[0]);
+        bottom.push(ink[1]);
+      }
+    }
+    rows.push(top, bottom);
+  }
+  return rows;
+}
 
 assert.deepEqual(
   herdrMetadata({

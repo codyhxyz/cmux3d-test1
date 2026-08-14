@@ -11,7 +11,7 @@ npm start
 
 `npm start` opens <https://codingcube.codyh.xyz> with a pairing code. Click a face and type: each face starts an ordinary shell in the current directory. Terminals and files remain on the computer running `npm start`. If the hosted page cannot connect, open <http://127.0.0.1:8064/>.
 
-The pairing code is stored in `~/.coding-cube/token`, so devices you have paired stay paired across restarts. Rotate it with `npm start -- --rotate-token`.
+The pairing code is stored in `~/.coding-cube/token`, so devices you have paired stay paired across restarts. Rotate it with `npm start -- --rotate-token`. To put it on a phone, run `coding-cube pair` and scan the QR — see [On a phone](#on-a-phone).
 
 To use another working directory or a local-only custom port:
 
@@ -145,13 +145,37 @@ itself; `spike/README.md` covers that, and `spike/RESULTS.md` is what was measur
 
 ## On a phone
 
-Phones get the same six shells, not a preview. The cube needs a computer to run them on. With Tailscale installed on both devices under the same account:
+Phones get the same six shells, not a preview.
+
+```bash
+coding-cube pair          # or: npm run pair
+```
+
+That prints a QR in the terminal. Point the phone's camera at it, tap the link, and the phone is paired — the link carries the address and the pairing code, so nothing gets typed on the phone. That was the whole problem: a pairing code is 32 random characters.
+
+It picks where to send the phone, and probes the address before printing it:
+
+| | Reaches the phone on | Needs |
+| --- | --- | --- |
+| **Cloud** | any network, cellular included | the cloud's pairing code on this machine |
+| **This computer, over Tailscale** | any network the phone is on | `--expose`, and this machine awake |
+| **This computer, on your Wi-Fi** | the same Wi-Fi | `HOST=0.0.0.0`, and this machine awake |
+
+The cloud comes first because it keeps working after the laptop closes. Pin the answer with `--cloud` or `--local`. When nothing can be reached, it says which of the three is missing what, rather than printing a QR that fails on the phone where there is nothing to read.
+
+The QR carries a bearer credential: whoever photographs the terminal gets shells. That is the pairing code's blast radius either way — it was already in a browser's `localStorage` — and `coding-cube pair --new-code` mints a fresh one, sets it on the Pages project, and unpairs everything at once.
+
+The cloud's code is a Cloudflare secret and Cloudflare will not read one back, so a machine that has never held it can either be given it (`coding-cube pair --cloud` prompts once, stores it in `~/.coding-cube/cloud-token`) or replace it (`--new-code`).
+
+### Direct exposure
+
+With Tailscale installed on both devices under the same account:
 
 ```bash
 npm start -- --expose
 ```
 
-That binds to your tailnet address and prints a link like `http://mymac.tail1234.ts.net:8064/#token=…`. Open it on the phone — the link carries both the address and the pairing code — and you are connected. Nothing else to configure: no certificate, no `tailscale serve`, no port forwarding.
+That binds to your tailnet address and prints a link like `http://mymac.tail1234.ts.net:8064/#token=…`. Open it on the phone — the link carries both the address and the pairing code — and you are connected. Nothing else to configure: no certificate, no `tailscale serve`, no port forwarding. `coding-cube pair` finds this address on its own.
 
 Once connected, tap a face to focus it and the keyboard comes up. A key row above the keyboard carries `esc`, `tab`, a sticky `ctrl`, arrows, and paste. Tap away from the cube to release.
 
